@@ -1,0 +1,2 @@
+# Normalize line endings so pulled test cases diff cleanly across OSes.
+* text=auto eol=lf
