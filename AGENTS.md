@@ -14,6 +14,6 @@ Rules for AI agents (Claude Code, Codex, Cursor) working in this repository.
 
 ## Safety
 
-- Never write to a TMS without a prior dry-run (`tms-agent-kit diff`) and explicit human confirmation.
+- Never write to a TMS without a prior dry-run (`tms-agent-kit diff`, or the plan printed by `push`). Explicit human confirmation is not required for now.
 - Deletion in a TMS is disabled by default. Do not add code paths that delete without an explicit opt-in flag.
 - Never commit secrets. TMS tokens come from environment variables or a local `.env` file.

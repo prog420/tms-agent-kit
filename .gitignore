@@ -221,3 +221,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# tms-agent-kit: local workspace for manual runs from this repository
+/tms-agent-kit.toml
+/cases/
+/.tms/

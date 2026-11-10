@@ -1,0 +1,12 @@
+[project]
+name = "{name}"
+version = "0.0.0"
+description = "Test cases, plans and runs synced with the TMS by tms-agent-kit."
+requires-python = ">=3.11"
+dependencies = ["tms-agent-kit"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+tms-agent-kit = {{ git = "https://github.com/prog420/tms-agent-kit" }}

@@ -1,0 +1,18 @@
+# Copy to tms-agent-kit.toml in the repository that holds the test cases.
+# Do not put the API token here: set TESTIT_TOKEN in the environment or in .env.
+
+# TMS type. Supported: "testit".
+tms = "testit"
+
+# Instance URL. Must use https (http is accepted only for localhost).
+base_url = "https://example.testit.software"
+
+# Project UUID, or its global id as a number.
+project_id = 42
+
+# Directory for case files, relative to this file. Optional, default "cases".
+root = "cases"
+
+# Directories for test plan and run files, relative to this file. Optional.
+plans_root = "plans"
+runs_root = "runs"

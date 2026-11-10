@@ -1,0 +1,2 @@
+# API token of Test IT. Copy this file to .env; never commit .env.
+TESTIT_TOKEN=
