@@ -28,6 +28,7 @@ def test_init_writes_the_template_once(tmp_path: Path) -> None:
     gitignore = (root / ".gitignore").read_text()
     assert ".env\n" in gitignore
     assert "projects/*/runs/\n" in gitignore
+    assert "projects/*/report.html\n" in gitignore
 
     (root / "AGENTS.md").write_text("mine\n")
     assert {p.kind for p in init_repository(root)} == {"exists"}

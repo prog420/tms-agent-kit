@@ -219,6 +219,9 @@ Text is passed through unchanged in both directions. Text sent through the API i
 - `casefile.py`: Markdown rendering and parsing.
 - `workspace.py`: files, `.tms/` state, section-to-folder mapping.
 - `sync.py`: pull, plan, push.
+- `plans.py`, `plan_sync.py`: plan files and plan push.
+- `runs.py`, `run_sync.py`: run files and run push.
+- `report.py`: the offline HTML report. Read-only over the same files; it reuses the diff logic of `sync.py` and `plan_sync.py` for unpushed changes.
 - `testit/client.py`: HTTP client.
 - `testit/mapping.py`: Test IT JSON <-> model, PUT/POST bodies, Test IT validation rules.
 

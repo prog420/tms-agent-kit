@@ -62,6 +62,7 @@ tms-agent-kit plan diff                # plan file changes against the last plan
 tms-agent-kit plan push [--allow-delete] [--confirm TOKEN]   # create, update, archive plans
 tms-agent-kit run new PLAN_FILE [--configuration NAME]       # write a run file to fill in (offline)
 tms-agent-kit run push RUN_FILE [--confirm TOKEN]            # upload the run results
+tms-agent-kit report [-o FILE]         # HTML page of cases, plans, runs and evidence (offline)
 
 tms-agent-kit init [--project NAME --base-url URL --project-id ID]   # test repository layout
 tms-agent-kit skills install [--dir DIR] [--force]                 # install or update agent skills
@@ -95,6 +96,17 @@ tms-agent-kit run push runs/2026-11-10-regress.md   # review, then repeat with -
 The run appears in the TMS under the plan. Test IT accepts results only for automated cases, so `run push` links each executed case to its own autotest `tms-agent-kit-<globalId>`; the case becomes automated.
 
 The case file format and sync rules are described in [docs/design.md](docs/design.md). Plans and runs: [docs/test-plans.md](docs/test-plans.md).
+
+## Report
+
+`tms-agent-kit report` writes one static HTML page, by default `report.html` next to `tms-agent-kit.toml`. It is built from the local files and `.tms/`, makes no network calls and includes unpushed edits. The page shows:
+
+- totals and coverage by section, by the latest result of each case;
+- what needs attention: failed and blocked cases, invalid files, unpushed changes, cases without steps, cases outside any plan, planned cases never run, duplicate names;
+- plans with their runs, and runs with comments, step results and evidence images;
+- every case with its steps and result history; search and filters.
+
+Links lead to Test IT and to the local files. Evidence links are relative, so keep the page inside the workspace or pass `-o` within it. The page is self-contained: open it from disk or publish it as a CI artifact.
 
 ## Agent skills
 

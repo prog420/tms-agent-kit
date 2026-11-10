@@ -17,6 +17,7 @@ projects/<name>/
   plans/               # test plans
   runs/                # run files and evidence; not committed
   .tms/                # tool state; never edit by hand
+  report.html          # `tms-agent-kit report`; not committed
 .claude/skills/        # agent skills; update with `uv run tms-agent-kit skills install`
 .mcp.json              # MCP servers for agents (browser automation)
 .env                   # TESTIT_TOKEN; never read, print or commit it
@@ -35,3 +36,4 @@ projects/<name>/
 - `/test <path to product repository> [ticket, branch or feature]`: test a change end to end.
 - `uv run tms-agent-kit init --project NAME --base-url URL --project-id ID`: add a project.
 - `uv run tms-agent-kit skills install`: update the skills after upgrading tms-agent-kit.
+- `uv run tms-agent-kit report`: write `report.html` with coverage, results and evidence (offline).

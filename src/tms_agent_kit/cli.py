@@ -27,6 +27,7 @@ from tms_agent_kit.plan_sync import (
     plan_changes,
     push_plans,
 )
+from tms_agent_kit.report import NOT_RUN, build_report, write_report
 from tms_agent_kit.run_sync import (
     check_run_remote,
     describe_run,
@@ -35,6 +36,7 @@ from tms_agent_kit.run_sync import (
     plan_run,
     push_run,
 )
+from tms_agent_kit.runs import OUTCOMES
 from tms_agent_kit.sync import (
     Change,
     Create,
@@ -176,6 +178,23 @@ def build_parser() -> argparse.ArgumentParser:
     run_push.add_argument("run_file", type=Path, metavar="RUN_FILE", help="the run file")
     run_push.add_argument("--confirm", metavar="TOKEN", help="upload with this token")
 
+    report_parser = commands.add_parser(
+        "report",
+        help="write an HTML report of cases, plans and runs",
+        description=(
+            "Write one static HTML page with the cases, plans and runs of the workspace: "
+            "coverage by section, latest results, evidence, and what needs attention. "
+            "Built from local files; makes no network calls."
+        ),
+    )
+    report_parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        metavar="FILE",
+        help="where to write the page (default: report.html next to tms-agent-kit.toml)",
+    )
+
     init_parser = commands.add_parser(
         "init",
         help="lay out a test repository in the current folder; add a project",
@@ -238,6 +257,8 @@ def main(
             return _diff(ws, None)
         if args.command == "plan" and args.plan_command == "diff":
             return _plan_diff(ws)
+        if args.command == "report":
+            return _report_html(ws, config, args.output)
         if args.command == "run" and args.run_command == "new":
             return _run_new(ws, args.plan_file, args.configuration)
         with client_factory(config, load_token(config)) as client:
@@ -360,6 +381,23 @@ def _plan_list(ws: Workspace, client: TestItClient) -> int:
         where = f"  <- {local}" if local else ""
         status = tms_plan.get("status", "?")
         print(f"#{tms_plan.get('globalId')}  {status:<10} {tms_plan.get('name')}{build}{where}")
+    return EXIT_OK
+
+
+def _report_html(ws: Workspace, config: Config, output: Path | None) -> int:
+    report = build_report(ws, config)
+    path = (output or ws.base_dir / "report.html").resolve()
+    write_report(report, path)
+    cases = report.runnable
+    last = Counter(c.last_outcome for c in cases)
+    totals = ", ".join(f"{last[o]} {o.lower()}" for o in (*OUTCOMES, NOT_RUN) if last[o])
+    print(f"written   {ws.display(path)}")
+    print(
+        f"{len(cases)} cases ({totals or 'no results'}), {len(report.plans)} plans, "
+        f"{len(report.runs)} runs"
+    )
+    for problem in report.problems:
+        _print_event(Event("error", problem.target, problem.message))
     return EXIT_OK
 
 
