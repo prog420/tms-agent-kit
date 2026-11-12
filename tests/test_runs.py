@@ -4,6 +4,8 @@ from tms_agent_kit.frontmatter import FormatError
 from tms_agent_kit.runs import (
     CaseResult,
     StepResult,
+    duration,
+    format_duration,
     parse_run,
     render_template,
     set_run_id,
@@ -68,6 +70,9 @@ def test_parse_full_run() -> None:
         ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: ok\n", "line 6: result must be one of"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: passed\nResult: failed\n", "duplicate"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\n- Step 1: passed\n", "need a 'Result:'"),
+        ("---\nplan: p.md\n---\n# R\n## 1 A\nTime: 5m\n", "'Time:' needs a 'Result:'"),
+        ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: passed\nTime: soon\n", "line 7: time"),
+        ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: passed\nTime: 1m\nTime: 2m\n", "dupl"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\n## 1 B\n", "line 6: case #1 is listed twice"),
         ("---\nplan: p.md\n---\n# R\n## A\n", "line 5: expected '## <case global id> <name>'"),
         (
@@ -118,3 +123,40 @@ def test_step_attachment_needs_an_outcome() -> None:
     text = "---\nplan: p.md\n---\n# R\n## 1 A\nResult: failed\n- Step 1: ![s](s.png)\n"
     with pytest.raises(FormatError, match="line 7: attachments of a step need its outcome"):
         parse_run(text)
+
+
+@pytest.mark.parametrize(
+    ("value", "seconds", "shown"),
+    [
+        ("45s", 45, "45s"),
+        ("4m 30s", 270, "4m 30s"),
+        ("4m30sec", 270, "4m 30s"),
+        ("12 min", 720, "12m"),
+        ("1h 5m", 3900, "1h 5m"),
+        ("4:30", 270, "4m 30s"),
+        ("1:04:30", 3870, "1h 4m"),
+        ("", None, None),
+    ],
+)
+def test_duration(value: str, seconds: int | None, shown: str | None) -> None:
+    assert duration(value, 1) == seconds
+    if seconds is not None:
+        assert format_duration(seconds) == shown
+
+
+@pytest.mark.parametrize("value", ["soon", "5 minutes", "30s 4m", "4:75", "1:60:00", "m"])
+def test_bad_duration(value: str) -> None:
+    with pytest.raises(FormatError, match="time must look like"):
+        duration(value, 1)
+
+
+def test_time_per_case_and_run_total() -> None:
+    text = FULL.replace("Result: failed\n", "Result: failed\nTime: 4m 30s\n").replace(
+        "Result: PASSED\n", "Result: PASSED\ntime: 90s\n"
+    )
+    run = parse_run(text)
+    balance, quota, _ = run.results
+    assert (balance.seconds, quota.seconds) == (270, 90)
+    assert balance.comment == "The card is not shown.\nSecond line."
+    assert run.seconds == 360
+    assert parse_run(FULL).seconds is None

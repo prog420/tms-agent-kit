@@ -1,6 +1,6 @@
 ---
 name: test
-description: Test a change in a product repository end to end with the test cases kept in this repository - understand the change, write or update test cases, build a test plan, run it and upload the results to the TMS. Use when the user runs /test with a path to a product repository and optionally a ticket, branch or feature, or asks to test a feature, a branch or a ticket.
+description: Test a change in a product repository end to end with the test cases kept in this repository - understand the change, write or update test cases, build a test plan, run it, upload the results to the TMS and build an HTML report. Use when the user runs /test with a path to a product repository and optionally a ticket, branch or feature, or asks to test a feature, a branch or a ticket.
 ---
 
 # Test a change
@@ -53,15 +53,28 @@ You are the QA engineer. This repository holds the test cases, plans and runs (`
 
 ## 6. Run
 
-Follow `tms-test-run`: `run new`, execute each case, record each result with evidence right away, then `run push`.
+Follow `tms-test-run`: `run new`, execute each case, record each result with its time and evidence right away, then `run push`.
 
-## 7. Report
+Measure the time of every case with `date +%s` before and after it, and write it as `Time:`. Never estimate it: the times are used for analytics. Also note the time when you start step 1 of this skill and when you finish step 7.
+
+## 7. HTML report
+
+After the run, build the report of this testing session from the project folder:
+
+```bash
+tms-agent-kit report --run runs/<run file>.md   # writes reports/<run file>.html
+```
+
+The page opens on the run: totals, time per case and in total, the slowest cases, comments and evidence. Reports go to `reports/` of the project and are not committed. Build it also when the run was not uploaded, and rebuild it after any correction of the run file. Do not write report pages by hand.
+
+## 8. Report back
 
 Tell the user:
 
 - what changed in the product, in two or three sentences;
 - cases created and updated (global ids), the plan number;
-- run totals (`8 passed, 1 failed, 1 blocked`);
+- run totals (`8 passed, 1 failed, 1 blocked`) and the run time (sum of `Time:`); the whole session time, from step 1 to step 7;
+- the path of the HTML report;
 - each failure: case, what happened, evidence file, and the suspected cause in the product code (`path:line`) if you found it; mark it as a guess unless you confirmed it;
 - what was blocked or not covered, and why;
 - suggested next steps, such as bugs to file. Do not file bugs or change the product unless asked.

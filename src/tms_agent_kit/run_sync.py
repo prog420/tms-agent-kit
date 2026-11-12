@@ -21,6 +21,7 @@ from tms_agent_kit.runs import (
     CaseResult,
     FileRef,
     RunFile,
+    format_duration,
     parse_run,
     render_template,
     set_run_id,
@@ -96,7 +97,7 @@ class RunCase:
     step_attachments: dict[int, list[Attachment]] = field(default_factory=dict)
     # Result attachments to upload: all of them for a new run, the added ones on update.
     new_attachments: list[Attachment] = field(default_factory=list)
-    result_changed: bool = True  # outcome or comment differ from the pushed result
+    result_changed: bool = True  # outcome, comment or time differ from the pushed result
     # What the autotest needs before results can be sent; set by check_run_remote.
     autotest: AutotestAction = "ready"
     autotest_model: Json | None = None
@@ -239,8 +240,9 @@ def plan_run(ws: Workspace, run_path: Path) -> RunPlan:
             run_case.new_attachments = [
                 a for a in run_case.attachments if a.shown not in pushed_files
             ]
-            sent = (pushed["outcome"], pushed["comment"])
-            run_case.result_changed = sent != (case_result.outcome, case_result.comment)
+            sent = (pushed["outcome"], pushed["comment"], pushed.get("seconds"))
+            current = (case_result.outcome, case_result.comment, case_result.seconds)
+            run_case.result_changed = sent != current
             if not (run_case.result_changed or run_case.new_attachments):
                 result.unchanged += 1
                 continue
@@ -433,6 +435,7 @@ def push_run(ws: Workspace, state: State, client: TestItClient, run_plan: RunPla
                 str(c.case.global_id): {
                     "outcome": c.result.outcome,
                     "comment": c.result.comment,
+                    "seconds": c.result.seconds,
                     "steps": _steps_json(c),
                     "attachments": [a.shown for a in c.attachments],
                     "result_id": result_id,
@@ -488,7 +491,7 @@ def _result_body(run_case: RunCase, configuration_id: str, uploaded: dict[str, s
     def ids(files: list[Attachment]) -> list[Json]:
         return [{"id": uploaded[a.shown]} for a in files]
 
-    return {
+    body: Json = {
         "configurationId": configuration_id,
         "autoTestExternalId": run_case.external_id,
         "outcome": result.outcome,
@@ -504,6 +507,9 @@ def _result_body(run_case: RunCase, configuration_id: str, uploaded: dict[str, s
             for s in result.steps
         ],
     }
+    if result.seconds is not None:
+        body["duration"] = result.seconds * 1000  # milliseconds
+    return body
 
 
 def _update_results(ws: Workspace, client: TestItClient, run_plan: RunPlan) -> list[Event]:
@@ -518,9 +524,15 @@ def _update_results(ws: Workspace, client: TestItClient, run_plan: RunPlan) -> l
         entry = snapshot["results"][str(run_case.case.global_id)]
         try:
             if run_case.result_changed:
-                body = {"outcome": result.outcome, "comment": result.comment or None}
+                body: Json = {"outcome": result.outcome, "comment": result.comment or None}
+                if result.seconds is not None:
+                    body["durationInMs"] = result.seconds * 1000
                 client.update_test_result(run_case.result_id, body)
-                entry |= {"outcome": result.outcome, "comment": result.comment}
+                entry |= {
+                    "outcome": result.outcome,
+                    "comment": result.comment,
+                    "seconds": result.seconds,
+                }
             for attachment in run_case.new_attachments:
                 if attachment.shown not in uploaded:
                     uploaded[attachment.shown] = _upload(client, attachment)
@@ -532,6 +544,8 @@ def _update_results(ws: Workspace, client: TestItClient, run_plan: RunPlan) -> l
         finally:
             ws.save_run_snapshot(run_id, snapshot)
         details = [str(result.outcome).lower()]
+        if result.seconds is not None:
+            details.append(format_duration(result.seconds))
         if run_case.new_attachments:
             details.append(f"+{_plural(len(run_case.new_attachments), 'attachment')}")
         events.append(Event("updated", run_case.label, ", ".join(details)))
@@ -551,7 +565,9 @@ def outcome_summary(run_plan: RunPlan) -> str:
         parts.append(f"{run_plan.unchanged} unchanged")
     if run_plan.not_executed:
         parts.append(f"{run_plan.not_executed} not executed")
-    return ", ".join(parts) or "nothing to upload"
+    summary = ", ".join(parts) or "nothing to upload"
+    seconds = run_plan.run_file.seconds
+    return f"{summary}; time {format_duration(seconds)}" if seconds is not None else summary
 
 
 def describe_run(run_plan: RunPlan) -> list[Event]:
@@ -564,6 +580,8 @@ def describe_run(run_plan: RunPlan) -> list[Event]:
     lines = [Event("run", run_plan.target, head)]
     for c in run_plan.cases:
         details = []
+        if c.result.seconds is not None:
+            details.append(format_duration(c.result.seconds))
         if c.result.steps and run_plan.mode == "create":
             details.append(_plural(len(c.result.steps), "step result"))
         files = _uploads(c)

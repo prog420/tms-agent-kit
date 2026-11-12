@@ -13,6 +13,7 @@ Layout:
     ## 1042 <case name>
 
     Result: failed
+    Time: 4m 30s
 
     Free comment.
 
@@ -21,6 +22,7 @@ Layout:
     [console log](logs/console.txt)
 
 A case without a `Result:` value was not executed and is not uploaded.
+`Time:` is the time spent on the case: `45s`, `4m 30s`, `1h 5m` or `4:30`.
 Markdown images and links to local files are attachments: of the step on a `- Step N:` line,
 of the result elsewhere. They are removed from the comment sent to the TMS.
 HTML comments (`<!-- ... -->`) are ignored, so a template can carry hints.
@@ -39,6 +41,9 @@ OUTCOMES = ("Passed", "Failed", "Blocked", "Skipped")
 
 _CASE_RE = re.compile(r"^##\s+#?(\d+)\b(.*)$")
 _RESULT_RE = re.compile(r"^result\s*:\s*(.*?)\s*$", re.IGNORECASE)
+_TIME_RE = re.compile(r"^time\s*:\s*(.*?)\s*$", re.IGNORECASE)
+_UNITS_RE = re.compile(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?)?\s*(?:(\d+)\s*s(?:ec)?)?", re.I)
+_CLOCK_RE = re.compile(r"(?:(\d+):)?(\d{1,2}):(\d{2})")
 # Markdown image or link: ![alt](target) or [text](target), target optionally in <...>.
 _LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
@@ -68,6 +73,7 @@ class CaseResult:
     line: int
     outcome: str | None  # None: not executed
     comment: str = ""
+    seconds: int | None = None  # time spent on the case; None: not recorded
     steps: tuple[StepResult, ...] = ()
     attachments: tuple[FileRef, ...] = ()
 
@@ -84,6 +90,12 @@ class RunFile:
     def executed(self) -> list[CaseResult]:
         return [r for r in self.results if r.outcome is not None]
 
+    @property
+    def seconds(self) -> int | None:
+        """Total time of the executed cases that record it; None if none does."""
+        times = [r.seconds for r in self.executed if r.seconds is not None]
+        return sum(times) if times else None
+
 
 def outcome(value: str, line: int) -> str | None:
     if not value.strip():
@@ -92,6 +104,33 @@ def outcome(value: str, line: int) -> str | None:
     if canonical is None:
         raise FormatError(f"result must be one of: {', '.join(OUTCOMES)}; got {value!r}", line)
     return canonical
+
+
+def duration(value: str, line: int) -> int | None:
+    """Seconds from `45s`, `4m 30s`, `1h 5m`, `4:30` or `1:04:30`. Empty: None."""
+    text = value.strip()
+    if not text:
+        return None
+    units = _UNITS_RE.fullmatch(text)
+    if units and any(units.groups()):
+        hours, minutes, seconds = (int(g or 0) for g in units.groups())
+        return hours * 3600 + minutes * 60 + seconds
+    clock = _CLOCK_RE.fullmatch(text)
+    if clock and int(clock.group(3)) < 60 and (clock.group(1) is None or int(clock.group(2)) < 60):
+        hours, minutes, seconds = (int(g or 0) for g in clock.groups())
+        return hours * 3600 + minutes * 60 + seconds
+    raise FormatError(f"time must look like 45s, 4m 30s, 1h 5m or 4:30; got {value!r}", line)
+
+
+def format_duration(seconds: int) -> str:
+    """`45s`, `4m 30s`, `1h 5m`: the form `Time:` takes."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    if minutes:
+        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+    return f"{secs}s"
 
 
 def parse_run(text: str) -> RunFile:
@@ -143,6 +182,8 @@ def parse_run(text: str) -> RunFile:
             raise FormatError(f"case #{r.global_id}: a step is listed twice", r.line)
         if r.steps and r.outcome is None:
             raise FormatError(f"case #{r.global_id}: step results need a 'Result:'", r.line)
+        if r.seconds is not None and r.outcome is None:
+            raise FormatError(f"case #{r.global_id}: 'Time:' needs a 'Result:'", r.line)
     return RunFile(
         plan=plan,
         configuration=front.optional("configuration", str),
@@ -159,6 +200,8 @@ class _CaseBuilder:
     line: int
     outcome: str | None = None
     has_result: bool = False
+    seconds: int | None = None
+    has_time: bool = False
     comment: list[str] = field(default_factory=list)
     steps: list[StepResult] = field(default_factory=list)
     attachments: list[FileRef] = field(default_factory=list)
@@ -170,6 +213,13 @@ class _CaseBuilder:
                 raise FormatError("duplicate 'Result:' line", number)
             self.has_result = True
             self.outcome = outcome(result.group(1), number)
+            return
+        time = _TIME_RE.match(line)
+        if time:
+            if self.has_time:
+                raise FormatError("duplicate 'Time:' line", number)
+            self.has_time = True
+            self.seconds = duration(time.group(1), number)
             return
         text, refs = extract_attachments(line, number)
         step = _STEP_RE.match(text)
@@ -192,6 +242,7 @@ class _CaseBuilder:
             line=self.line,
             outcome=self.outcome,
             comment=normalize_text("\n".join(self.comment)),
+            seconds=self.seconds,
             steps=tuple(sorted(self.steps, key=lambda s: s.number)),
             attachments=tuple(self.attachments),
         )
@@ -236,6 +287,7 @@ def _strip_html_comments(text: str) -> str:
 _TEMPLATE_HINT = """<!--
 Fill in one 'Result:' per executed case: passed, failed, blocked or skipped.
 Leave it empty for cases you did not execute; they are not uploaded.
+'Time:' is the time spent on the case, for example 4m 30s.
 Text under 'Result:' is the comment. Optional step results:
 - Step 2: failed, what went wrong ![screenshot]({evidence}/<case id>-step-2.png)
 Links to local files are uploaded as attachments; paths are relative to this file.
@@ -257,7 +309,7 @@ def render_template(
     hint = _TEMPLATE_HINT.format(evidence=evidence)
     out = ["---", dump_yaml(front).rstrip("\n"), "---", "", f"# {name}", "", hint, ""]
     for global_id, case_name in cases:
-        out += [f"## {global_id} {case_name}", "", "Result:", ""]
+        out += [f"## {global_id} {case_name}", "", "Result:", "Time:", ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
 

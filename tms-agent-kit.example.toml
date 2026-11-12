@@ -13,6 +13,7 @@ project_id = 42
 # Directory for case files, relative to this file. Optional, default "cases".
 root = "cases"
 
-# Directories for test plan and run files, relative to this file. Optional.
+# Directories for test plan files, run files and HTML reports, relative to this file. Optional.
 plans_root = "plans"
 runs_root = "runs"
+reports_root = "reports"

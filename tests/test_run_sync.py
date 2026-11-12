@@ -44,7 +44,7 @@ def fill(path: Path, results: dict[int, str]) -> None:
     text = path.read_text(encoding="utf-8")
     for global_id, block in results.items():
         heading = next(line for line in text.split("\n") if line.startswith(f"## {global_id} "))
-        text = text.replace(f"{heading}\n\nResult:\n", f"{heading}\n\n{block}\n")
+        text = text.replace(f"{heading}\n\nResult:\nTime:\n", f"{heading}\n\n{block}\n")
     path.write_text(text, encoding="utf-8")
 
 
@@ -167,6 +167,32 @@ def test_repush_updates_changed_results_only(
         f"case #{quota['globalId']} was pushed; its result cannot be removed",
         "the case is not in the pushed run; start a new run",
     ]
+
+
+def test_time_is_uploaded_and_updated(
+    items: list[Json], ws: Workspace, fake: FakeTestIt, client: TestItClient
+) -> None:
+    balance, quota, _ = items
+    path = new_run(ws, ws.plans_root / "regress.md", None)
+    fill(
+        path,
+        {balance["globalId"]: "Result: passed\nTime: 4m 30s", quota["globalId"]: "Result: passed"},
+    )
+    run_plan = checked(ws, client, path)
+    assert outcome_summary(run_plan) == "2 passed, 1 not executed; time 4m 30s"
+    assert describe_run(run_plan)[1].message.startswith("4m 30s; creates autotest")
+    push(ws, client, path)
+    timed, untimed = fake.writes[-1][1]
+    assert timed["duration"] == 270_000
+    assert "duration" not in untimed
+    fake.writes.clear()
+
+    path.write_text(path.read_text(encoding="utf-8").replace("Time: 4m 30s", "Time: 5m"))
+    assert push(ws, client, path) == ["updated"]
+    assert fake.writes == [
+        ("PUT result", {"outcome": "Passed", "comment": None, "durationInMs": 300_000})
+    ]
+    assert checked(ws, client, path).cases == []
 
 
 def test_step_results_are_fixed_after_push(

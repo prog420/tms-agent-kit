@@ -236,11 +236,12 @@ tms = "testit"
 base_url = "https://example.testit.software"
 project_id = 42      # UUID or global id
 root = "cases"
-plans_root = "plans" # test plan files, see test-plans.md
-runs_root = "runs"   # test run files
+plans_root = "plans"      # test plan files, see test-plans.md
+runs_root = "runs"        # test run files
+reports_root = "reports"  # HTML pages written by `report`
 ```
 
-The three roots must not overlap.
+The roots must not overlap.
 
 Token: `TESTIT_TOKEN` environment variable, or the nearest `.env` from the config folder up to the git repository root (only the config folder outside a git repository). Sent as `Authorization: PrivateToken <token>`. Never written to config or state.
 

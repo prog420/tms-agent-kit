@@ -27,7 +27,7 @@ from tms_agent_kit.plan_sync import (
     plan_changes,
     push_plans,
 )
-from tms_agent_kit.report import NOT_RUN, build_report, write_report
+from tms_agent_kit.report import NOT_RUN, build_report, find_run, write_report
 from tms_agent_kit.run_sync import (
     check_run_remote,
     describe_run,
@@ -192,7 +192,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         metavar="FILE",
-        help="where to write the page (default: report.html next to tms-agent-kit.toml)",
+        help="where to write the page (default: report.html, or RUN_FILE's name, in reports_root)",
+    )
+    report_parser.add_argument(
+        "--run",
+        type=Path,
+        metavar="RUN_FILE",
+        help="open the page on this run: a report on one test session",
     )
 
     init_parser = commands.add_parser(
@@ -258,7 +264,7 @@ def main(
         if args.command == "plan" and args.plan_command == "diff":
             return _plan_diff(ws)
         if args.command == "report":
-            return _report_html(ws, config, args.output)
+            return _report_html(ws, config, args.output, args.run)
         if args.command == "run" and args.run_command == "new":
             return _run_new(ws, args.plan_file, args.configuration)
         with client_factory(config, load_token(config)) as client:
@@ -384,10 +390,18 @@ def _plan_list(ws: Workspace, client: TestItClient) -> int:
     return EXIT_OK
 
 
-def _report_html(ws: Workspace, config: Config, output: Path | None) -> int:
+def _report_html(ws: Workspace, config: Config, output: Path | None, run: Path | None) -> int:
     report = build_report(ws, config)
-    path = (output or ws.base_dir / "report.html").resolve()
-    write_report(report, path)
+    focus = None
+    if run is not None:
+        focus = find_run(report, run)
+        if focus is None:
+            raise SyncError(f"{run}: not a run file in {ws.display(config.runs_root)}/")
+        if focus.run is None:
+            raise SyncError(f"{ws.display(focus.path)}: {focus.error}")
+    name = f"{focus.path.stem}.html" if focus is not None else "report.html"
+    path = (output or config.reports_root / name).resolve()
+    write_report(report, path, focus)
     cases = report.runnable
     last = Counter(c.last_outcome for c in cases)
     totals = ", ".join(f"{last[o]} {o.lower()}" for o in (*OUTCOMES, NOT_RUN) if last[o])

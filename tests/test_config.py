@@ -27,6 +27,7 @@ def test_load_valid_config(tmp_path: Path) -> None:
     assert config.root == tmp_path.resolve() / "cases"
     assert config.plans_root == tmp_path.resolve() / "plans"
     assert config.runs_root == tmp_path.resolve() / "runs"
+    assert config.reports_root == tmp_path.resolve() / "reports"
     assert config.workspace == tmp_path.resolve()
 
 
@@ -62,6 +63,7 @@ def test_http_allowed_for_localhost(tmp_path: Path) -> None:
         (VALID + 'plans_root = "../plans"\n', "plans_root must be a subdirectory"),
         (VALID + 'plans_root = "cases/plans"\n', "root and plans_root must not overlap"),
         (VALID + 'runs_root = "plans"\n', "plans_root and runs_root must not overlap"),
+        (VALID + 'reports_root = "runs/html"\n', "runs_root and reports_root must not overlap"),
         (VALID + 'token = "secret"\n', "unknown keys: token"),
         ("tms = ", "Invalid"),
     ],

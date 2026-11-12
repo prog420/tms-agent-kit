@@ -38,8 +38,9 @@ def items(fake: FakeTestIt, ws: Workspace, client: TestItClient, config: Config)
     fill(
         first,
         {
-            balance: "Result: passed",
-            quota: "Result: failed\n\nNo card ![card](shots/quota.png)\n\n- Step 2: failed, empty",
+            balance: "Result: passed\nTime: 4m 30s",
+            quota: "Result: failed\nTime: 1m\n\nNo card ![card](shots/quota.png)\n\n"
+            "- Step 2: failed, empty",
         },
     )
     run_plan = plan_run(ws, first)
@@ -55,7 +56,7 @@ def fill(path: Path, results: dict[int, str]) -> None:
     text = path.read_text(encoding="utf-8")
     for global_id, block in results.items():
         heading = next(line for line in text.split("\n") if line.startswith(f"## {global_id} "))
-        text = text.replace(f"{heading}\n\nResult:\n", f"{heading}\n\n{block}\n")
+        text = text.replace(f"{heading}\n\nResult:\nTime:\n", f"{heading}\n\n{block}\n")
     path.write_text(text, encoding="utf-8")
 
 
@@ -115,9 +116,41 @@ def test_cli_report(
     monkeypatch.chdir(ws.base_dir)
     assert main(["report"]) == EXIT_OK
     out = capsys.readouterr().out
-    assert "written   report.html\n" in out
+    assert "written   reports/report.html\n" in out
     assert "3 cases (2 passed, 1 not run), 1 plans, 2 runs" in out
-    assert (ws.base_dir / "report.html").read_text().startswith("<!doctype html>")
+    assert (ws.base_dir / "reports" / "report.html").read_text().startswith("<!doctype html>")
 
     assert main(["report", "-o", "out/r.html"]) == EXIT_OK
     assert (ws.base_dir / "out" / "r.html").is_file()
+
+
+def test_time_spent(items: list[Json], ws: Workspace, config: Config) -> None:
+    report = build_report(ws, config)
+    assert [r.seconds for r in report.runs] == [330, None]
+    html = render_html(report, ws.base_dir, datetime(2026, 1, 2))
+    assert '<span class=time title="time spent">5m 30s</span>' in html  # the run
+    assert '<span class=time title="time spent">4m 30s</span>' in html  # a result
+    assert "Time spent</div><div class=value>5m 30s</div><div class=muted>1 of 2 runs" in html
+
+
+def test_cli_report_on_one_run(
+    items: list[Json],
+    ws: Workspace,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(ws.base_dir)
+    first = build_report(ws, config).runs[0].path
+    assert main(["report", "--run", str(first)]) == EXIT_OK
+    out = config.reports_root / f"{first.stem}.html"
+    assert f"written   reports/{first.stem}.html\n" in capsys.readouterr().out
+    html = out.read_text()
+    assert '<section id="run"><h2>This run</h2>' in html
+    assert f'<details id="r-{first.stem}" open>' in html
+    assert html.count(f'<details id="r-{first.stem}"') == 1
+    assert "slowest: " in html
+    assert 'src="../runs/shots/quota.png"' in html  # evidence links work from reports/
+
+    assert main(["report", "--run", "plans/regress.md"]) == 2
+    assert "not a run file in runs/" in capsys.readouterr().err

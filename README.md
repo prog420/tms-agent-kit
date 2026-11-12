@@ -37,7 +37,7 @@ uv sync && cp .env.example .env    # set TESTIT_TOKEN
 cd projects/shop && uv run tms-agent-kit check && uv run tms-agent-kit pull
 ```
 
-`init` writes `AGENTS.md`, `CLAUDE.md`, `.gitignore` (run results are not committed), `.mcp.json` (Playwright), `pyproject.toml`, `projects/<name>/tms-agent-kit.toml`, and installs the agent skills into `.claude/skills/`. It never overwrites files; run it again to add a project.
+`init` writes `AGENTS.md`, `CLAUDE.md`, `.gitignore` (run results and reports are not committed), `.mcp.json` (Playwright), `pyproject.toml`, `projects/<name>/tms-agent-kit.toml`, and installs the agent skills into `.claude/skills/`. It never overwrites files; run it again to add a project.
 
 To use the tool in a single repository instead, create the config from the example and set the token:
 
@@ -62,7 +62,7 @@ tms-agent-kit plan diff                # plan file changes against the last plan
 tms-agent-kit plan push [--allow-delete] [--confirm TOKEN]   # create, update, archive plans
 tms-agent-kit run new PLAN_FILE [--configuration NAME]       # write a run file to fill in (offline)
 tms-agent-kit run push RUN_FILE [--confirm TOKEN]            # upload the run results
-tms-agent-kit report [-o FILE]         # HTML page of cases, plans, runs and evidence (offline)
+tms-agent-kit report [--run RUN_FILE] [-o FILE]   # HTML page of cases, plans, runs and evidence (offline)
 
 tms-agent-kit init [--project NAME --base-url URL --project-id ID]   # test repository layout
 tms-agent-kit skills install [--dir DIR] [--force]                 # install or update agent skills
@@ -88,10 +88,13 @@ Testing a plan:
 ```bash
 tms-agent-kit plan push                # plans/*.md: '# name' and a '## Cases' list of ids, files, folders
 tms-agent-kit run new plans/regress.md # writes runs/<date>-regress.md
-# execute the cases, fill in 'Result: passed|failed|blocked|skipped' per case;
+# execute the cases, fill in 'Result: passed|failed|blocked|skipped' and 'Time: 4m 30s' per case;
 # link screenshots and logs with ![shot](2026-11-10-regress/step-2.png): they become attachments
 tms-agent-kit run push runs/2026-11-10-regress.md   # review, then repeat with --confirm TOKEN
+tms-agent-kit report --run runs/2026-11-10-regress.md   # writes reports/2026-11-10-regress.html
 ```
+
+`Time:` is the time spent on the case. It is uploaded as the result duration and summed per run in the report, for analytics.
 
 The run appears in the TMS under the plan. Test IT accepts results only for automated cases, so `run push` links each executed case to its own autotest `tms-agent-kit-<globalId>`; the case becomes automated.
 
@@ -99,11 +102,12 @@ The case file format and sync rules are described in [docs/design.md](docs/desig
 
 ## Report
 
-`tms-agent-kit report` writes one static HTML page, by default `report.html` next to `tms-agent-kit.toml`. It is built from the local files and `.tms/`, makes no network calls and includes unpushed edits. The page shows:
+`tms-agent-kit report` writes one static HTML page, by default `reports/report.html` next to `tms-agent-kit.toml` (`reports_root` in the config). With `--run RUN_FILE`, the page is named after the run and opens on it: a report on one test session. It is built from the local files and `.tms/`, makes no network calls and includes unpushed edits. The page shows:
 
 - totals and coverage by section, by the latest result of each case;
 - what needs attention: failed and blocked cases, invalid files, unpushed changes, cases without steps, cases outside any plan, planned cases never run, duplicate names;
 - plans with their runs, and runs with comments, step results and evidence images;
+- time spent per case and per run, from the `Time:` lines of the run files;
 - every case with its steps and result history; search and filters.
 
 Links lead to Test IT and to the local files. Evidence links are relative, so keep the page inside the workspace or pass `-o` within it. The page is self-contained: open it from disk or publish it as a CI artifact.
@@ -112,7 +116,7 @@ Links lead to Test IT and to the local files. Evidence links are relative, so ke
 
 The package ships [Agent Skills](https://agentskills.io) (`src/tms_agent_kit/skills/`):
 
-- `test`: `/test <product repository> [ticket]`: understand the change, update cases, build a plan, run it, report.
+- `test`: `/test <product repository> [ticket]`: understand the change, update cases, build a plan, run it, build the HTML report, report back.
 - `tms-test-cases`: write and edit cases, pull, diff, push.
 - `tms-test-run`: plans, run files, executing cases, evidence, uploading results.
 

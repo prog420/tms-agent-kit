@@ -46,6 +46,8 @@ plans/                          # configurable: plans_root
   proj-123-regress.md
 runs/                           # configurable: runs_root
   2026-11-10-proj-123-regress.md
+reports/                        # configurable: reports_root; `report` writes HTML pages here
+  2026-11-10-proj-123-regress.html
 .tms/
   plans/<plan-uuid>.json        # TMS snapshot from the last plan push (merge base)
 ```
@@ -130,6 +132,7 @@ Result:
 ## 1045 Вход с неверным паролем
 
 Result: failed
+Time: 4m 30s
 
 No error message; the form is cleared and the page shows "500 Internal Server Error".
 
@@ -142,6 +145,7 @@ Rules for filling in:
 
 - `Result:` takes `passed`, `failed`, `blocked` or `skipped`, case-insensitive. Empty means not executed; such cases are not uploaded.
 - Text after the `Result:` line is the result comment.
+- `Time:` is the time spent on the case: `45s`, `4m 30s`, `1h 5m`, `4:30`. Optional; it needs a `Result:`. `run new` writes an empty `Time:` under each `Result:`.
 - `- Step N: <outcome>[, comment]` lines set step results. Steps without a line take no step result.
 - The agent reads the case files to execute the steps. The run file only holds results.
 
@@ -165,9 +169,9 @@ Rules for filling in:
    1. Create the autotest `tms-agent-kit-<globalId>` with steps `Step 1..N`, or link an existing one; fix its steps if the case step count changed. Rewrite the linked case files from the TMS (new version, `automated: true`).
    2. Create a test run for the executed cases: `POST /api/v2/testRuns/byConfigurations` with one test point selector. The plan moves to `InProgress` by itself.
    3. Write the run `id` into the run file frontmatter.
-   4. Send all results in one request: `POST /api/v2/testRuns/{id}/testResults` with outcome, message (the comment) and step results by step title.
+   4. Send all results in one request: `POST /api/v2/testRuns/{id}/testResults` with outcome, message (the comment), `duration` in milliseconds (from `Time:`) and step results by step title.
    5. Save `.tms/runs/<id>.json`: what was sent and the result ids. The run completes by itself once every test point has a result.
-5. Pushing a run file that has an `id` again sends changed outcomes and comments with `PUT /api/v2/testResults/{id}`. A result changed in the TMS since the push is a conflict. Step results cannot change after push, and a pushed result cannot be removed; start a new run with `run new` instead.
+5. Pushing a run file that has an `id` again sends changed outcomes, comments and times with `PUT /api/v2/testResults/{id}` (`durationInMs` for the time). A result changed in the TMS since the push is a conflict. Step results cannot change after push, and a pushed result cannot be removed; start a new run with `run new` instead.
 
 Requests are sequential. Writes are never retried. If sending results fails, the run stays open in the TMS without results; remove the `id` line and push again to create a new run.
 
@@ -194,6 +198,8 @@ Checked on 2026-11-10 against a sandbox project with throwaway plans and cases, 
 10. `POST /api/v2/attachments` (multipart, field `file`) returns the attachment id. Ids in `attachments` of a result and of its `stepResults` are stored. The result lists all of them; `autoTestStepResults` keeps step attachments on their step.
 11. `PUT /api/v2/testResults/{id}` without `attachments` keeps the existing attachments.
 12. `PUT /api/v2/testResults/{id}/attachments/{attachmentId}` adds an uploaded file to a result, also on a completed run.
+
+Not verified yet: `duration` in `POST /api/v2/testRuns/{id}/testResults` and `durationInMs` in `PUT /api/v2/testResults/{id}` set the result duration.
 
 ## Milestones
 

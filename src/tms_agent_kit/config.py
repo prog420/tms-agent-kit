@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 import tomllib
 from collections.abc import Mapping
@@ -17,11 +18,12 @@ DOTENV_FILE = ".env"
 DEFAULT_ROOT = "cases"
 DEFAULT_PLANS_ROOT = "plans"
 DEFAULT_RUNS_ROOT = "runs"
+DEFAULT_REPORTS_ROOT = "reports"
 
 # Environment variable that holds the API token, per TMS.
 TOKEN_ENV = {"testit": "TESTIT_TOKEN"}
 
-_KNOWN_KEYS = {"tms", "base_url", "project_id", "root", "plans_root", "runs_root"}
+_KNOWN_KEYS = {"tms", "base_url", "project_id", "root", "plans_root", "runs_root", "reports_root"}
 # Plain http is accepted only for local hosts: elsewhere it would expose the token.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -39,6 +41,7 @@ class Config:
     root: Path
     plans_root: Path
     runs_root: Path
+    reports_root: Path
 
     @property
     def workspace(self) -> Path:
@@ -80,10 +83,11 @@ def load_config(path: Path) -> Config:
             ("root", DEFAULT_ROOT),
             ("plans_root", DEFAULT_PLANS_ROOT),
             ("runs_root", DEFAULT_RUNS_ROOT),
+            ("reports_root", DEFAULT_REPORTS_ROOT),
         )
     }
     # Each root holds one kind of file; nested roots would mix them.
-    for a, b in (("root", "plans_root"), ("root", "runs_root"), ("plans_root", "runs_root")):
+    for a, b in itertools.combinations(roots, 2):
         if roots[a].is_relative_to(roots[b]) or roots[b].is_relative_to(roots[a]):
             raise ConfigError(f"{path}: {a} and {b} must not overlap")
     return Config(
@@ -94,6 +98,7 @@ def load_config(path: Path) -> Config:
         root=roots["root"],
         plans_root=roots["plans_root"],
         runs_root=roots["runs_root"],
+        reports_root=roots["reports_root"],
     )
 
 

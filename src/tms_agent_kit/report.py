@@ -21,7 +21,14 @@ from tms_agent_kit.frontmatter import FormatError
 from tms_agent_kit.model import Case, Step
 from tms_agent_kit.plan_sync import plan_changes, resolve_cases
 from tms_agent_kit.plans import parse_plan
-from tms_agent_kit.runs import OUTCOMES, CaseResult, FileRef, RunFile, parse_run
+from tms_agent_kit.runs import (
+    OUTCOMES,
+    CaseResult,
+    FileRef,
+    RunFile,
+    format_duration,
+    parse_run,
+)
 from tms_agent_kit.sync import Create, Delete, Update, load_state
 from tms_agent_kit.sync import plan as case_changes
 from tms_agent_kit.workspace import State, Workspace
@@ -79,6 +86,10 @@ class RunRow:
         if self.run is None:
             return Counter()
         return Counter(r.outcome or NOT_RUN for r in self.run.results)
+
+    @property
+    def seconds(self) -> int | None:
+        return self.run.seconds if self.run is not None else None
 
 
 @dataclass
@@ -200,10 +211,11 @@ def _run_status(ws: Workspace, run_file: RunFile) -> str:
     sent = snapshot.get("results", {})
     for result in run_file.executed:
         before = sent.get(str(result.global_id))
-        if before is None or (before.get("outcome"), before.get("comment")) != (
-            result.outcome,
-            result.comment,
-        ):
+        if before is None or (
+            before.get("outcome"),
+            before.get("comment"),
+            before.get("seconds"),
+        ) != (result.outcome, result.comment, result.seconds):
             return "changed"
     return "pushed"
 
@@ -211,15 +223,27 @@ def _run_status(ws: Workspace, run_file: RunFile) -> str:
 # HTML
 
 
-def write_report(report: Report, output: Path) -> None:
-    report.ws.write_file(output, render_html(report, output.parent, datetime.now()))
+def write_report(report: Report, output: Path, focus: RunRow | None = None) -> None:
+    html = render_html(report, output.parent, datetime.now(), focus)
+    report.ws.write_file(output, html)
 
 
-def render_html(report: Report, out_dir: Path, generated: datetime) -> str:
-    view = _View(report, out_dir.resolve())
+def find_run(report: Report, path: Path) -> RunRow | None:
+    path = path.resolve()
+    return next((r for r in report.runs if r.path.resolve() == path), None)
+
+
+def render_html(
+    report: Report, out_dir: Path, generated: datetime, focus: RunRow | None = None
+) -> str:
+    """`focus`: a run to open at the top of the page, for a report on one test session."""
+    view = _View(report, out_dir.resolve(), focus)
     title = report.state.project_name or report.config.workspace.name
+    if focus is not None and focus.run is not None:
+        title = focus.run.name
     body = [
         view.header(title, generated),
+        view.focused(),
         view.overview(),
         view.attention(),
         view.sections(),
@@ -231,9 +255,10 @@ def render_html(report: Report, out_dir: Path, generated: datetime) -> str:
 
 
 class _View:
-    def __init__(self, report: Report, out_dir: Path) -> None:
+    def __init__(self, report: Report, out_dir: Path, focus: RunRow | None = None) -> None:
         self.r = report
         self.out_dir = out_dir
+        self.focus = focus
         state = report.state
         base = report.config.base_url.rstrip("/")
         self.project_url = (
@@ -283,7 +308,9 @@ class _View:
             f"<header><h1>{escape(title)}</h1><p class=muted>{tms} · last pull {pulled} · "
             f"report {generated:%Y-%m-%d %H:%M} · from local files, unpushed edits included"
             "</p>"
-            '<nav><a href="#attention">Attention</a><a href="#sections">Sections</a>'
+            "<nav>"
+            + ('<a href="#run">This run</a>' if self.focus is not None else "")
+            + '<a href="#attention">Attention</a><a href="#sections">Sections</a>'
             '<a href="#plans">Plans</a><a href="#runs">Runs</a><a href="#cases">Cases</a></nav>'
             "</header>"
         )
@@ -301,6 +328,10 @@ class _View:
             ("Blocked", str(last["Blocked"]), "latest result", "blocked"),
             ("Plans", str(len(self.r.plans)), f"{len(self.r.runs)} runs"),
         ]
+        times = [run.seconds for run in self.r.runs if run.seconds is not None]
+        if times:
+            note = f"{len(times)} of {len(self.r.runs)} runs"
+            tiles.append(("Time spent", format_duration(sum(times)), note))
         html = []
         for tile in tiles:
             label, value, note = tile[:3]
@@ -420,37 +451,60 @@ class _View:
             "</section>"
         )
 
+    def focused(self) -> str:
+        run = self.focus
+        if run is None or run.run is None:
+            return ""
+        executed = run.run.executed
+        timed = [r for r in executed if r.seconds is not None]
+        notes = [f"{len(executed)} of {len(run.run.results)} cases executed"]
+        if timed:
+            notes.append(f"time recorded for {len(timed)} of {len(executed)}")
+        slowest = sorted(timed, key=lambda r: r.seconds or 0, reverse=True)[:3]
+        slow = ", ".join(
+            f'<a href="#c-{r.global_id}">#{r.global_id}</a> {_time(r.seconds)}' for r in slowest
+        )
+        return (
+            f'<section id="run"><h2>This run</h2><p class=muted>{" · ".join(notes)}'
+            + (f" · slowest: {slow}" if slow else "")
+            + f"</p>{self.run_block(run, open_=True)}</section>"
+        )
+
     def runs(self) -> str:
         if not self.r.runs:
             return '<section id="runs"><h2>Runs</h2><p class=muted>No run files.</p></section>'
-        blocks = []
-        for run in reversed(self.r.runs):
-            if run.run is None:
-                continue
-            plan = self.plan_ref(run.plan) if run.plan else escape(run.run.plan)
-            config = f" · {escape(run.run.configuration)}" if run.run.configuration else ""
-            tms = self.run_url(run)
-            tms_link = (
-                f' · <a href="{escape(tms)}" target="_blank" rel="noopener">Test IT</a>'
-                if tms
-                else ""
-            )
-            results = "".join(self.result(run, result) for result in run.run.results)
-            blocks.append(
-                f'<details id="r-{_anchor(run.path.stem)}"><summary>'
-                f"<b>{escape(run.run.name)}</b> <span class=id>{escape(run.path.name)}</span> "
-                f"{_pill(run.status)} {_totals(run.totals)}"
-                f"</summary><p class=muted>Plan {plan}{config} · "
-                f'<a href="{self.href(run.path)}">{escape(run.path.name)}</a>{tms_link}</p>'
-                f"<div class=results>{results}</div></details>"
-            )
+        blocks = [self.run_block(run) for run in reversed(self.r.runs) if run is not self.focus]
+        if not any(blocks):
+            blocks = ["<p class=muted>No other runs.</p>"]
         return f'<section id="runs"><h2>Runs</h2>{"".join(blocks)}</section>'
+
+    def run_block(self, run: RunRow, *, open_: bool = False) -> str:
+        run_file = run.run
+        if run_file is None:
+            return ""
+        plan = self.plan_ref(run.plan) if run.plan else escape(run_file.plan)
+        config = f" · {escape(run_file.configuration)}" if run_file.configuration else ""
+        tms = self.run_url(run)
+        tms_link = (
+            f' · <a href="{escape(tms)}" target="_blank" rel="noopener">Test IT</a>' if tms else ""
+        )
+        results = "".join(self.result(run, result) for result in run_file.results)
+        return (
+            f'<details id="r-{_anchor(run.path.stem)}"{" open" if open_ else ""}>'
+            f"<summary><b>{escape(run_file.name)}</b> "
+            f"<span class=id>{escape(run.path.name)}</span> "
+            f"{_pill(run.status)} {_totals(run.totals)} {_time(run.seconds)}"
+            f"</summary><p class=muted>Plan {plan}{config} · "
+            f'<a href="{self.href(run.path)}">{escape(run.path.name)}</a>{tms_link}</p>'
+            f"<div class=results>{results}</div></details>"
+        )
 
     def result(self, run: RunRow, result: CaseResult) -> str:
         outcome = result.outcome or NOT_RUN
         parts = [
             f'<div class="result"><div class=line>{_pill(outcome)} '
-            f"<span class=id>#{result.global_id}</span> {escape(result.title)}</div>"
+            f"<span class=id>#{result.global_id}</span> {escape(result.title)} "
+            f"{_time(result.seconds)}</div>"
         ]
         if result.comment:
             parts.append(f"<div class=text>{escape(result.comment)}</div>")
@@ -548,7 +602,7 @@ class _View:
             else ""
         )
         history = "".join(
-            f"<li>{_pill(res.outcome or NOT_RUN)} {self.run_ref(run)}"
+            f"<li>{_pill(res.outcome or NOT_RUN)} {self.run_ref(run)} {_time(res.seconds)}"
             + (f" — {escape(_first_line(res.comment))}" if res.comment else "")
             + "</li>"
             for run, res in reversed(c.results)
@@ -621,6 +675,12 @@ def _steps(title: str, steps: tuple[Step, ...]) -> str:
 
 def _pill(value: str) -> str:
     return f'<span class="pill {value.lower().replace(" ", "")}">{escape(value)}</span>'
+
+
+def _time(seconds: int | None) -> str:
+    if seconds is None:
+        return ""
+    return f'<span class=time title="time spent">{format_duration(seconds)}</span>'
 
 
 def _totals(totals: Counter[str]) -> str:
@@ -738,6 +798,8 @@ details ul { padding-left: 20px; }
 .pill.skipped { background: var(--skip-bg); color: var(--skip); }
 .pill.new, .pill.local { background: var(--info-bg); color: var(--info); }
 .tag { font-size: 12px; color: var(--muted); margin-right: 6px; }
+.time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
 .id { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
   margin-right: 6px; }
 a.id { color: var(--accent); }

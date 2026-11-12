@@ -50,10 +50,12 @@ configuration: Chrome          # optional
 ## 1042 Login with a valid password
 
 Result: passed
+Time: 2m
 
 ## 1044 Login with a locked account
 
 Result: failed
+Time: 6m 15s
 
 Free comment, several lines allowed.
 
@@ -65,11 +67,13 @@ Free comment, several lines allowed.
 ## 1047 Not executed yet
 
 Result:
+Time:
 ```
 
 - Write it with `tms-agent-kit run new PLAN_FILE`. Do not change `plan` or `id`.
 - `Result:` takes `passed`, `failed`, `blocked` or `skipped`, any case. Empty: not executed, not uploaded.
-- Text under `Result:` is the comment. HTML comments `<!-- -->` are ignored.
+- `Time:` is the time spent on the case: `45s`, `4m 30s`, `1h 5m`, `4:30`. Optional; it needs a `Result:`. It is uploaded as the result duration (milliseconds in Test IT).
+- Text under `Result:` and `Time:` is the comment. HTML comments `<!-- -->` are ignored.
 - `- Step N: <outcome>[, comment]` sets the result of step N of the case (steps under `## Steps`; preconditions do not count). It needs a `Result:` for the case.
 - Images and links to local files are attachments, paths relative to the run file. On a step line they belong to the step. Files must be inside the workspace and not in hidden folders. URLs stay in the comment.
 - A case listed twice, a step listed twice, an unknown case or a step number beyond the case's steps is an error.
