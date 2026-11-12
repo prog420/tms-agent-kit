@@ -320,6 +320,7 @@ class _View:
         self.focus = focus
         self.by_global_id = {c.global_id: c for c in report.cases if c.global_id is not None}
         self.bug_by_path = {b.path.resolve(): b for b in report.bugs if b.bug is not None}
+        self.focus_bugs = self.run_bugs(focus) if focus is not None else []
         state = report.state
         base = report.config.base_url.rstrip("/")
         self.project_url = (
@@ -524,10 +525,7 @@ class _View:
         run_file = run.run
         executed = run_file.executed
         totals = run.totals
-        cases = [
-            self.by_global_id[r.global_id] for r in executed if r.global_id in self.by_global_id
-        ]
-        bugs = sorted({id(b): b for c in cases for b in c.bugs}.values(), key=lambda b: b.order)
+        bugs = self.focus_bugs
         open_bugs = sum(b.is_open for b in bugs)
         timed = [r for r in executed if r.seconds is not None]
         tiles = [
@@ -555,6 +553,13 @@ class _View:
             parts.append(f"<h3>Bugs</h3>{''.join(self.bug(b) for b in bugs)}")
         parts.append(f"<h3>Results and evidence</h3>{self.run_block(run, open_=True)}</section>")
         return "".join(parts)
+
+    def run_bugs(self, run: RunRow) -> list[BugRow]:
+        """Bugs linked to the executed cases of a run."""
+        executed = run.run.executed if run.run is not None else []
+        found = (self.by_global_id.get(r.global_id) for r in executed)
+        bugs = {id(b): b for c in found if c is not None for b in c.bugs}
+        return sorted(bugs.values(), key=lambda b: b.order)
 
     def case_table(self, run_file: RunFile) -> str:
         rows = []
@@ -639,9 +644,13 @@ class _View:
         if not bugs:
             return '<section id="bugs"><h2>Bugs</h2><p class=muted>No bug files.</p></section>'
         open_count = sum(b.is_open for b in bugs)
+        others = [b for b in bugs if b not in self.focus_bugs]  # the run shows its own
+        cards = "".join(self.bug(b) for b in others)
+        if len(others) < len(bugs):
+            cards = f"<p class=muted>Bugs of this run are shown above.</p>{cards}"
         return (
             f'<section id="bugs"><h2>Bugs <span class=count>{open_count} open of {len(bugs)}'
-            f"</span></h2>{''.join(self.bug(b) for b in bugs)}</section>"
+            f"</span></h2>{cards}</section>"
         )
 
     def bug(self, row: BugRow) -> str:

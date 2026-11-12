@@ -210,4 +210,5 @@ def test_bugs_and_run_notes(items: list[Json], ws: Workspace, config: Config) ->
     assert 'href="https://tracker.example/BUG-1"' in html
     assert "Open bugs</div><div class=value>1</div>" in html
     assert "Failed without an open bug" not in html  # the failed quota case has its bug
-    assert html.count("<b>Quota card is &lt;empty&gt;</b>") == 2  # this run and all bugs
+    assert html.count('id="b-quota-card"') == 1  # shown in this run, not again under Bugs
+    assert html.count('id="b-old"') == 1  # a bug of no case of this run
