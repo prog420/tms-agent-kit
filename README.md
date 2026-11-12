@@ -62,7 +62,7 @@ tms-agent-kit plan diff                # plan file changes against the last plan
 tms-agent-kit plan push [--allow-delete] [--confirm TOKEN]   # create, update, archive plans
 tms-agent-kit run new PLAN_FILE [--configuration NAME]       # write a run file to fill in (offline)
 tms-agent-kit run push RUN_FILE [--confirm TOKEN]            # upload the run results
-tms-agent-kit report [--run RUN_FILE] [-o FILE]   # HTML page of cases, plans, runs and evidence (offline)
+tms-agent-kit report [--run RUN_FILE] [-o FILE]   # HTML page of cases, plans, runs, bugs and evidence (offline)
 
 tms-agent-kit init [--project NAME --base-url URL --project-id ID]   # test repository layout
 tms-agent-kit skills install [--dir DIR] [--force]                 # install or update agent skills
@@ -96,17 +96,41 @@ tms-agent-kit report --run runs/2026-11-10-regress.md   # writes reports/2026-11
 
 `Time:` is the time spent on the case. It is uploaded as the result duration and summed per run in the report, for analytics.
 
+Text between the run name and the first case is the run notes: Markdown with `## Summary`, `## Environment`, `## Observations`, `## Cleanup` and other headings that do not start with a number. Notes stay local and appear in the report.
+
+## Bugs
+
+A product defect found while testing goes into a bug file, `bugs/<slug>.md` (`bugs_root` in the config). Its evidence goes into `bugs/<slug>/`.
+
+```markdown
+---
+severity: major          # critical | major | minor | trivial
+status: open             # open | fixed | closed
+cases: [1045]            # global ids of the cases that show the defect
+found: 2026-11-10        # optional
+ticket: PROJ-123         # optional: the change under test
+url: https://jira/BUG-1  # optional: the tracker issue, once filed
+---
+
+# Wrong password shows "500 Internal Server Error"
+
+Summary. Then `## Steps`, `## Expected`, `## Actual`, `## Cause`, `## Evidence`.
+```
+
+The tool never sends bug files anywhere. The report lists them, links them to cases and runs, and flags failed cases without an open bug.
+
 The run appears in the TMS under the plan. Test IT accepts results only for automated cases, so `run push` links each executed case to its own autotest `tms-agent-kit-<globalId>`; the case becomes automated.
 
 The case file format and sync rules are described in [docs/design.md](docs/design.md). Plans and runs: [docs/test-plans.md](docs/test-plans.md).
 
 ## Report
 
-`tms-agent-kit report` writes one static HTML page, by default `reports/report.html` next to `tms-agent-kit.toml` (`reports_root` in the config). With `--run RUN_FILE`, the page is named after the run and opens on it: a report on one test session. It is built from the local files and `.tms/`, makes no network calls and includes unpushed edits. The page shows:
+`tms-agent-kit report` writes one static HTML page, by default `reports/report.html` next to `tms-agent-kit.toml` (`reports_root` in the config). With `--run RUN_FILE`, the page is named after the run and opens on it: a report on one test session, with totals, run notes, a table of cases, the bugs of these cases, then results and evidence. It is built from the local files and `.tms/`, makes no network calls and includes unpushed edits. The page shows:
 
 - totals and coverage by section, by the latest result of each case;
-- what needs attention: failed and blocked cases, invalid files, unpushed changes, cases without steps, cases outside any plan, planned cases never run, duplicate names;
-- plans with their runs, and runs with comments, step results and evidence images;
+- what needs attention: failed and blocked cases, open bugs, failed cases without an open bug, invalid files, unpushed changes, cases without steps, cases outside any plan, planned cases never run, duplicate names;
+- plans with their runs, and runs with notes, comments, step results and evidence images;
+- bugs with severity, status, cases and evidence;
 - time spent per case and per run, from the `Time:` lines of the run files;
 - every case with its steps and result history; search and filters.
 

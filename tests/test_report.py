@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from tests.fake_testit import FakeTestIt
+from tms_agent_kit.bugs import SEVERITIES
 from tms_agent_kit.casefile import render
 from tms_agent_kit.cli import EXIT_OK, main
 from tms_agent_kit.config import Config
@@ -117,7 +118,7 @@ def test_cli_report(
     assert main(["report"]) == EXIT_OK
     out = capsys.readouterr().out
     assert "written   reports/report.html\n" in out
-    assert "3 cases (2 passed, 1 not run), 1 plans, 2 runs" in out
+    assert "3 cases (2 passed, 1 not run), 1 plans, 2 runs, 0 open bugs" in out
     assert (ws.base_dir / "reports" / "report.html").read_text().startswith("<!doctype html>")
 
     assert main(["report", "-o", "out/r.html"]) == EXIT_OK
@@ -149,8 +150,64 @@ def test_cli_report_on_one_run(
     assert '<section id="run"><h2>This run</h2>' in html
     assert f'<details id="r-{first.stem}" open>' in html
     assert html.count(f'<details id="r-{first.stem}"') == 1
-    assert "slowest: " in html
+    assert "<h3>Cases</h3>" in html
     assert 'src="../runs/shots/quota.png"' in html  # evidence links work from reports/
 
     assert main(["report", "--run", "plans/regress.md"]) == 2
     assert "not a run file in runs/" in capsys.readouterr().err
+
+
+BUG = """---
+severity: major
+cases: [{case}, 9999]
+found: 2026-11-12
+url: https://tracker.example/BUG-1
+---
+
+# Quota card is <empty>
+
+The card shows **nothing**. Run `curl`.
+
+## Evidence
+
+![card](quota-card/shot.png)
+"""
+
+
+def test_bugs_and_run_notes(items: list[Json], ws: Workspace, config: Config) -> None:
+    quota = items[1]["globalId"]
+    ws.bugs_root.mkdir()
+    (ws.bugs_root / "quota-card.md").write_text(BUG.format(case=quota))
+    (ws.bugs_root / "quota-card").mkdir()
+    (ws.bugs_root / "quota-card" / "shot.png").write_bytes(b"png")
+    (ws.bugs_root / "quota-card" / "log.md").write_text("evidence, not a bug")
+    (ws.bugs_root / "old.md").write_text("---\nseverity: minor\nstatus: fixed\n---\n# Old\n")
+    (ws.bugs_root / "broken.md").write_text("# No severity\n")
+    first = build_report(ws, config).runs[0].path
+    text = first.read_text()
+    notes = "## Summary\n\nOne **defect**: [card](../bugs/quota-card.md).\n"
+    first.write_text(text.replace("-->\n", "-->\n\n" + notes, 1).replace("No card", "No `card`"))
+
+    report = build_report(ws, config)
+    assert [b.path.name for b in report.bugs] == ["quota-card.md", "old.md", "broken.md"]
+    bug = report.bugs[0]
+    assert bug.is_open
+    assert [c.global_id for c in bug.cases] == [quota]
+    problems = [(p.target, p.message) for p in report.problems if "bugs/" in p.target]
+    assert problems == [
+        ("bugs/quota-card.md", "case #9999 not found"),
+        ("bugs/broken.md", "line 1: frontmatter must set severity: " + ", ".join(SEVERITIES)),
+    ]
+    assert report.runs[0].run is not None
+    assert report.runs[0].run.notes == notes.strip()
+
+    focus = report.runs[0]
+    html = render_html(report, config.reports_root, datetime(2026, 1, 2), focus)
+    assert '<h4>Summary</h4><p>One <b>defect</b>: <a href="#b-quota-card">card</a>.</p>' in html
+    assert "No <code>card</code>" in html
+    assert "Quota card is &lt;empty&gt;" in html
+    assert '<img src="../bugs/quota-card/shot.png" alt="card">' in html
+    assert 'href="https://tracker.example/BUG-1"' in html
+    assert "Open bugs</div><div class=value>1</div>" in html
+    assert "Failed without an open bug" not in html  # the failed quota case has its bug
+    assert html.count("<b>Quota card is &lt;empty&gt;</b>") == 2  # this run and all bugs

@@ -77,6 +77,7 @@ class Workspace:
         self.root = config.root
         self.plans_root = config.plans_root
         self.runs_root = config.runs_root
+        self.bugs_root = config.bugs_root
         self.base_dir = config.workspace
         self.state_dir = config.workspace / STATE_DIR
 
@@ -175,6 +176,9 @@ class Workspace:
 
     def plan_files(self) -> list[Path]:
         return _markdown_files(self.plans_root)
+
+    def bug_files(self) -> list[Path]:
+        return _markdown_files(self.bugs_root)
 
     # Case files
 

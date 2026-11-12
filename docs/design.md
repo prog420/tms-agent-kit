@@ -222,6 +222,8 @@ Text is passed through unchanged in both directions. Text sent through the API i
 - `plans.py`, `plan_sync.py`: plan files and plan push.
 - `runs.py`, `run_sync.py`: run files and run push.
 - `report.py`: the offline HTML report. Read-only over the same files; it reuses the diff logic of `sync.py` and `plan_sync.py` for unpushed changes.
+- `bugs.py`: the bug file format. Bug files are local; nothing sends them to the TMS.
+- `markdown.py`: a small escaping Markdown renderer for run notes and bug files in the report.
 - `testit/client.py`: HTTP client.
 - `testit/mapping.py`: Test IT JSON <-> model, PUT/POST bodies, Test IT validation rules.
 
@@ -239,6 +241,7 @@ root = "cases"
 plans_root = "plans"      # test plan files, see test-plans.md
 runs_root = "runs"        # test run files
 reports_root = "reports"  # HTML pages written by `report`
+bugs_root = "bugs"        # bug files found while testing
 ```
 
 The roots must not overlap.

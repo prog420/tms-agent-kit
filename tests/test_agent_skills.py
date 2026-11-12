@@ -36,7 +36,7 @@ def test_install_update_and_local_edits(tmp_path: Path) -> None:
     skill_md = target / "tms-test-run" / "SKILL.md"
     assert skill_md.is_file()
     manifest = json.loads((target / "tms-test-run" / MANIFEST).read_text())
-    assert set(manifest["files"]) == {"SKILL.md", "plan-and-run-files.md"}
+    assert set(manifest["files"]) == {"SKILL.md", "bug-files.md", "plan-and-run-files.md"}
     assert install(target) == []
 
     # A file from an older version that nobody changed is updated.

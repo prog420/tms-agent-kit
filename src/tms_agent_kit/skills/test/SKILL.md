@@ -57,6 +57,10 @@ Follow `tms-test-run`: `run new`, execute each case, record each result with its
 
 Measure the time of every case with `date +%s` before and after it, and write it as `Time:`. Never estimate it: the times are used for analytics. Also note the time when you start step 1 of this skill and when you finish step 7.
 
+Write the run notes into the run file (`tms-test-run`, "Notes and bugs"): the summary, what changed (from step 1), the environment (step 5), what is out of scope, observations and cleanup. Write a bug file for each product defect, with the suspected cause in the code (`path:line`) if you found it; mark it as a guess unless you confirmed it.
+
+Undo what you changed in the environment for the test (users, roles, limits, data), unless the user wants it kept. List it under `## Cleanup`.
+
 ## 7. HTML report
 
 After the run, build the report of this testing session from the project folder:
@@ -65,7 +69,7 @@ After the run, build the report of this testing session from the project folder:
 tms-agent-kit report --run runs/<run file>.md   # writes reports/<run file>.html
 ```
 
-The page opens on the run: totals, time per case and in total, the slowest cases, comments and evidence. Reports go to `reports/` of the project and are not committed. Build it also when the run was not uploaded, and rebuild it after any correction of the run file. Do not write report pages by hand.
+The page opens on the run: totals, time, the notes, a table of cases, the bugs, results and evidence. Reports go to `reports/` of the project and are not committed. Build it also when the run was not uploaded, and rebuild it after any change to the run file or a bug file. Do not write report pages by hand: put the content into the notes, comments and bug files.
 
 ## 8. Report back
 
@@ -75,6 +79,7 @@ Tell the user:
 - cases created and updated (global ids), the plan number;
 - run totals (`8 passed, 1 failed, 1 blocked`) and the run time (sum of `Time:`); the whole session time, from step 1 to step 7;
 - the path of the HTML report;
-- each failure: case, what happened, evidence file, and the suspected cause in the product code (`path:line`) if you found it; mark it as a guess unless you confirmed it;
+- each failure: case, what happened, the bug file and its severity, the suspected cause (`path:line`), marked as a guess unless confirmed;
+- observations that need a decision;
 - what was blocked or not covered, and why;
-- suggested next steps, such as bugs to file. Do not file bugs or change the product unless asked.
+- suggested next steps, such as bugs to file in the tracker. Do not file them or change the product unless asked.

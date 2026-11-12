@@ -1,6 +1,6 @@
 ---
 name: tms-test-run
-description: Run manual test plans with tms-agent-kit and report results to a TMS (Test IT). Use when the user asks to run a regression, smoke test or test plan, to check a feature against its test cases, to create or change a test plan, or to upload test results with screenshots so people can review the run in Test IT.
+description: Run manual test plans with tms-agent-kit and report results to a TMS (Test IT). Use when the user asks to run a regression, smoke test or test plan, to check a feature against its test cases, to create or change a test plan, to upload test results with screenshots so people can review the run in Test IT, or to record bugs found while testing.
 ---
 
 # Test plans and runs
@@ -12,7 +12,7 @@ The cases are Markdown files synced by the same tool. Edit them with the `tms-te
 ## Before you start
 
 1. Run `tms-agent-kit check`, then `tms-agent-kit pull` (or the way `AGENTS.md` says to run the tool, for example `uv run tms-agent-kit`). Pull updates case files that have no local edits and never overwrites local edits. A plan can only reference cases that are in the TMS.
-2. Find the folders in `tms-agent-kit.toml`: `root` (cases, default `cases/`), `plans_root` (default `plans/`), `runs_root` (default `runs/`), `reports_root` (HTML reports, default `reports/`).
+2. Find the folders in `tms-agent-kit.toml`: `root` (cases, default `cases/`), `plans_root` (default `plans/`), `runs_root` (default `runs/`), `reports_root` (HTML reports, default `reports/`), `bugs_root` (bug files, default `bugs/`).
 3. Never read, print or commit `.env`: it holds the API token.
 
 Exit codes of every command: `0` done or nothing to do, `1` changes pending (the normal result of `plan diff`, and of `plan push` and `run push` without `--confirm`), `2` error or conflict.
@@ -109,7 +109,53 @@ Evidence:
 - One file may be linked from several cases; it is uploaded once.
 - Evidence is uploaded to the TMS and may be committed. Do not capture tokens, passwords, cookies or personal data. Crop or skip such screenshots.
 
-## 4. Upload
+## 4. Notes and bugs
+
+Run notes are the text between the `# <run name>` line and the first case. Write them as you go and finish them before the upload. They stay local, are not uploaded, and open the HTML report. Use these headings; skip the empty ones:
+
+```markdown
+# PROJ-123 regress 2026-11-10
+
+## Summary
+
+Verdict in two or three sentences: does the change work, what is broken. Name the bugs.
+
+## What changed
+
+What the change does, for the user and in the code (`path`).
+
+## Environment
+
+Stand, build or commit, users, data you prepared. What you checked with: API, logs, database.
+
+## Out of scope
+
+What you did not test and why.
+
+## Observations
+
+- **Question.** Behavior that needs a decision, not a defect.
+- **Risk.** Something that may break later or elsewhere.
+- **Info.** Facts worth knowing: stand data, slow responses.
+
+## Cleanup
+
+| Action | Result |
+|---|---|
+| Token of t.user extended for the run | restored |
+```
+
+- Note headings must not start with a number: `## 2 problems` would start a case section.
+- Notes are Markdown: lists, tables, `code`, links to local files and to bug files.
+
+A product defect goes into a bug file, `bugs/<slug>.md`: format in [bug-files.md](bug-files.md).
+
+- Write one when a case fails because of the product. A blocked case gets one only if the product blocked it.
+- Search the bug files first (`grep -l "<case id>" bugs/*.md`, then the titles). If an open bug already describes the defect, add the case to its `cases` instead of a new file. If a `fixed` bug reproduces again, set it back to `open` and write the date.
+- When a case of a `fixed` or `open` bug passes, say so in the notes; set `fixed` only if the user agrees or the bug was yours from this session.
+- Findings that are not defects (questions, risks, facts) go to `## Observations` in the notes, not to bug files.
+
+## 5. Upload
 
 ```bash
 tms-agent-kit run push runs/2026-11-10-proj-123-regress.md                 # prints the results and a token
@@ -123,7 +169,7 @@ tms-agent-kit run push runs/2026-11-10-proj-123-regress.md --confirm TOKEN # upl
 
 Corrections after upload: change `Result:`, `Time:` or the comment, or add attachment links, and run `run push` again. Step results cannot change, and uploaded results and files cannot be removed. To test again, start a new run with `run new`.
 
-## 5. HTML report
+## 6. HTML report
 
 When the run is finished (uploaded, or complete if the user did not want an upload), build the report:
 
@@ -131,14 +177,17 @@ When the run is finished (uploaded, or complete if the user did not want an uplo
 tms-agent-kit report --run runs/2026-11-10-proj-123-regress.md   # writes reports/2026-11-10-proj-123-regress.html
 ```
 
-It is offline and reads only local files. The page opens on this run: results, time per case, evidence. It also shows the whole project: coverage, other runs, what needs attention. Reports are not committed. Do not write your own report pages; extend the run comments instead.
+It is offline and reads only local files. The page opens on this run: totals, the notes, a table of cases with time, the bugs of these cases, results and evidence. Below it shows the whole project: coverage, other runs, all bugs, what needs attention. Reports are not committed.
+
+Do not write your own report pages. Anything a reader should see goes into the notes, the case comments or the bug files; then rebuild the report.
 
 ## Report back
 
 Tell the user:
 
 - the totals (`5 passed, 1 failed, 1 blocked`), the run time (the `; time` part of the `run push` total) and the plan number in the TMS;
-- each failed and blocked case: global id, name, what happened, the evidence file;
+- each failed and blocked case: global id, name, what happened, the evidence file, the bug file;
+- bug files created or updated, with severity;
 - cases you did not execute and why;
 - anything that looked wrong in the cases themselves;
 - the path of the HTML report.

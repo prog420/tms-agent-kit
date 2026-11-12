@@ -182,8 +182,8 @@ def build_parser() -> argparse.ArgumentParser:
         "report",
         help="write an HTML report of cases, plans and runs",
         description=(
-            "Write one static HTML page with the cases, plans and runs of the workspace: "
-            "coverage by section, latest results, evidence, and what needs attention. "
+            "Write one static HTML page with the cases, plans, runs and bugs of the workspace: "
+            "coverage by section, latest results, run notes, evidence, and what needs attention. "
             "Built from local files; makes no network calls."
         ),
     )
@@ -408,7 +408,7 @@ def _report_html(ws: Workspace, config: Config, output: Path | None, run: Path |
     print(f"written   {ws.display(path)}")
     print(
         f"{len(cases)} cases ({totals or 'no results'}), {len(report.plans)} plans, "
-        f"{len(report.runs)} runs"
+        f"{len(report.runs)} runs, {sum(b.is_open for b in report.bugs)} open bugs"
     )
     for problem in report.problems:
         _print_event(Event("error", problem.target, problem.message))

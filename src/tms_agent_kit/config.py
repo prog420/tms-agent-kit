@@ -19,11 +19,21 @@ DEFAULT_ROOT = "cases"
 DEFAULT_PLANS_ROOT = "plans"
 DEFAULT_RUNS_ROOT = "runs"
 DEFAULT_REPORTS_ROOT = "reports"
+DEFAULT_BUGS_ROOT = "bugs"
 
 # Environment variable that holds the API token, per TMS.
 TOKEN_ENV = {"testit": "TESTIT_TOKEN"}
 
-_KNOWN_KEYS = {"tms", "base_url", "project_id", "root", "plans_root", "runs_root", "reports_root"}
+_KNOWN_KEYS = {
+    "tms",
+    "base_url",
+    "project_id",
+    "root",
+    "plans_root",
+    "runs_root",
+    "reports_root",
+    "bugs_root",
+}
 # Plain http is accepted only for local hosts: elsewhere it would expose the token.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -42,6 +52,7 @@ class Config:
     plans_root: Path
     runs_root: Path
     reports_root: Path
+    bugs_root: Path
 
     @property
     def workspace(self) -> Path:
@@ -84,6 +95,7 @@ def load_config(path: Path) -> Config:
             ("plans_root", DEFAULT_PLANS_ROOT),
             ("runs_root", DEFAULT_RUNS_ROOT),
             ("reports_root", DEFAULT_REPORTS_ROOT),
+            ("bugs_root", DEFAULT_BUGS_ROOT),
         )
     }
     # Each root holds one kind of file; nested roots would mix them.
@@ -99,6 +111,7 @@ def load_config(path: Path) -> Config:
         plans_root=roots["plans_root"],
         runs_root=roots["runs_root"],
         reports_root=roots["reports_root"],
+        bugs_root=roots["bugs_root"],
     )
 
 

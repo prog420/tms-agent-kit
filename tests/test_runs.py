@@ -66,7 +66,7 @@ def test_parse_full_run() -> None:
         ("---\nplan: p.md\n---\n", "missing '# <run name>'"),
         ("---\nplan: p.md\n---\ntext\n", "line 4: a run file must start with '# <run name>'"),
         ("---\nplan: p.md\nfoo: 1\n---\n# R\n", "line 3: unknown frontmatter keys: foo"),
-        ("---\nplan: p.md\n---\n# R\nnote\n## 1 A\n", "line 5: text before the first"),
+        ("---\nplan: p.md\n---\n# R\nnote\n# Other\n## 1 A\n", "line 6: run notes use '## '"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: ok\n", "line 6: result must be one of"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: passed\nResult: failed\n", "duplicate"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\n- Step 1: passed\n", "need a 'Result:'"),
@@ -74,7 +74,7 @@ def test_parse_full_run() -> None:
         ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: passed\nTime: soon\n", "line 7: time"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\nResult: passed\nTime: 1m\nTime: 2m\n", "dupl"),
         ("---\nplan: p.md\n---\n# R\n## 1 A\n## 1 B\n", "line 6: case #1 is listed twice"),
-        ("---\nplan: p.md\n---\n# R\n## A\n", "line 5: expected '## <case global id> <name>'"),
+        ("---\nplan: p.md\n---\n# R\n## 1 A\n## B\n", "line 6: expected '## <case global id>"),
         (
             "---\nplan: p.md\n---\n# R\n## 1 A\nResult: failed\n- Step 1: failed\n- Step 1: ok\n",
             "line 8: result must be one of",
@@ -160,3 +160,15 @@ def test_time_per_case_and_run_total() -> None:
     assert balance.comment == "The card is not shown.\nSecond line."
     assert run.seconds == 360
     assert parse_run(FULL).seconds is None
+
+
+def test_run_notes() -> None:
+    text = FULL.replace(
+        "spanning lines -->\n",
+        "spanning lines -->\n\n## Summary\n\nAll good.\n\n"
+        "```\n# a shell comment\n## 7 not a case\n```\n",
+    )
+    run = parse_run(text)
+    assert run.notes == "## Summary\n\nAll good.\n\n```\n# a shell comment\n## 7 not a case\n```"
+    assert [r.global_id for r in run.results] == [1042, 1043, 1044]
+    assert parse_run(FULL).notes == ""

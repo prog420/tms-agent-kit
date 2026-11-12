@@ -10,6 +10,9 @@ Layout:
 
     # <run name>
 
+    Run notes: free Markdown before the first case, with `## Summary`, `## Environment`
+    and other headings that do not start with a number. Kept locally; not uploaded.
+
     ## 1042 <case name>
 
     Result: failed
@@ -43,6 +46,7 @@ _CASE_RE = re.compile(r"^##\s+#?(\d+)\b(.*)$")
 _RESULT_RE = re.compile(r"^result\s*:\s*(.*?)\s*$", re.IGNORECASE)
 _TIME_RE = re.compile(r"^time\s*:\s*(.*?)\s*$", re.IGNORECASE)
 _UNITS_RE = re.compile(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?)?\s*(?:(\d+)\s*s(?:ec)?)?", re.I)
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _CLOCK_RE = re.compile(r"(?:(\d+):)?(\d{1,2}):(\d{2})")
 # Markdown image or link: ![alt](target) or [text](target), target optionally in <...>.
 _LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
@@ -85,6 +89,7 @@ class RunFile:
     id: str | None
     name: str
     results: tuple[CaseResult, ...]
+    notes: str = ""  # Markdown between the run name and the first case
 
     @property
     def executed(self) -> list[CaseResult]:
@@ -143,8 +148,10 @@ def parse_run(text: str) -> RunFile:
         raise FormatError("frontmatter must name the plan file: 'plan: plans/<name>.md'", 1)
 
     name: str | None = None
+    notes: list[str] = []
     results: list[CaseResult] = []
     current: _CaseBuilder | None = None
+    fence: str | None = None  # the open code fence: its lines are plain text
     for index in range(body_start, len(lines)):
         number, line = index + 1, lines[index]
         if name is None:
@@ -154,18 +161,30 @@ def parse_run(text: str) -> RunFile:
                 raise FormatError("a run file must start with '# <run name>'", number)
             name = line[2:].strip()
             continue
+        marker = _FENCE_RE.match(line)
+        if fence is not None or marker:
+            if fence is None and marker:
+                fence = marker.group(1)
+            elif marker and marker.group(1) == fence:
+                fence = None
+            if current is None:
+                notes.append(line)
+            else:
+                current.comment.append(line)
+            continue
         case = _CASE_RE.match(line)
         if case:
             if current is not None:
                 results.append(current.build())
             current = _CaseBuilder(int(case.group(1)), case.group(2).strip(), number)
             continue
+        if current is None:
+            if line.startswith("# "):
+                raise FormatError("run notes use '## ' headings; '# ' is the run name", number)
+            notes.append(line)
+            continue
         if line.startswith("#"):
             raise FormatError("expected '## <case global id> <name>'", number)
-        if current is None:
-            if line.strip():
-                raise FormatError("text before the first '## <case global id> <name>'", number)
-            continue
         current.add(line, number)
     if current is not None:
         results.append(current.build())
@@ -190,6 +209,7 @@ def parse_run(text: str) -> RunFile:
         id=front.optional("id", str),
         name=name,
         results=tuple(results),
+        notes=normalize_text("\n".join(notes)),
     )
 
 
@@ -285,6 +305,8 @@ def _strip_html_comments(text: str) -> str:
 
 
 _TEMPLATE_HINT = """<!--
+Run notes go here, before the first case: ## Summary, ## Environment, ## Observations,
+## Cleanup. Their headings must not start with a number. Notes are not uploaded.
 Fill in one 'Result:' per executed case: passed, failed, blocked or skipped.
 Leave it empty for cases you did not execute; they are not uploaded.
 'Time:' is the time spent on the case, for example 4m 30s.

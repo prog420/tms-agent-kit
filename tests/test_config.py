@@ -28,6 +28,7 @@ def test_load_valid_config(tmp_path: Path) -> None:
     assert config.plans_root == tmp_path.resolve() / "plans"
     assert config.runs_root == tmp_path.resolve() / "runs"
     assert config.reports_root == tmp_path.resolve() / "reports"
+    assert config.bugs_root == tmp_path.resolve() / "bugs"
     assert config.workspace == tmp_path.resolve()
 
 

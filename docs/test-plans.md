@@ -48,6 +48,9 @@ runs/                           # configurable: runs_root
   2026-11-10-proj-123-regress.md
 reports/                        # configurable: reports_root; `report` writes HTML pages here
   2026-11-10-proj-123-regress.html
+bugs/                           # configurable: bugs_root; defects found while testing
+  login-500-on-wrong-password.md
+  login-500-on-wrong-password/  # evidence of the bug
 .tms/
   plans/<plan-uuid>.json        # TMS snapshot from the last plan push (merge base)
 ```
@@ -145,6 +148,7 @@ Rules for filling in:
 
 - `Result:` takes `passed`, `failed`, `blocked` or `skipped`, case-insensitive. Empty means not executed; such cases are not uploaded.
 - Text after the `Result:` line is the result comment.
+- Text between the run name and the first case is the run notes: Markdown, kept locally and shown in the report, not uploaded. Note headings must not start with a number: `## 2 fixes` would start a case.
 - `Time:` is the time spent on the case: `45s`, `4m 30s`, `1h 5m`, `4:30`. Optional; it needs a `Result:`. `run new` writes an empty `Time:` under each `Result:`.
 - `- Step N: <outcome>[, comment]` lines set step results. Steps without a line take no step result.
 - The agent reads the case files to execute the steps. The run file only holds results.

@@ -47,6 +47,10 @@ configuration: Chrome          # optional
 
 # PROJ-123 regress 2026-11-10
 
+## Summary
+
+Login works; the locked account gets no message (bugs/locked-account-no-message.md).
+
 ## 1042 Login with a valid password
 
 Result: passed
@@ -73,6 +77,7 @@ Time:
 - Write it with `tms-agent-kit run new PLAN_FILE`. Do not change `plan` or `id`.
 - `Result:` takes `passed`, `failed`, `blocked` or `skipped`, any case. Empty: not executed, not uploaded.
 - `Time:` is the time spent on the case: `45s`, `4m 30s`, `1h 5m`, `4:30`. Optional; it needs a `Result:`. It is uploaded as the result duration (milliseconds in Test IT).
+- Text between `# <run name>` and the first case is the run notes: Markdown, kept locally, shown in the HTML report, not uploaded. Their headings must not start with a number. `# ` is reserved for the run name.
 - Text under `Result:` and `Time:` is the comment. HTML comments `<!-- -->` are ignored.
 - `- Step N: <outcome>[, comment]` sets the result of step N of the case (steps under `## Steps`; preconditions do not count). It needs a `Result:` for the case.
 - Images and links to local files are attachments, paths relative to the run file. On a step line they belong to the step. Files must be inside the workspace and not in hidden folders. URLs stay in the comment.

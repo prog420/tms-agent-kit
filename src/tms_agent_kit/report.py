@@ -1,6 +1,6 @@
-"""`report`: one static HTML page with the cases, plans and runs of a workspace.
+"""`report`: one static HTML page with the cases, plans, runs and bugs of a workspace.
 
-The report is built from local files only: case files, plan files, run files and `.tms/`.
+The report is built from local files only: case, plan, run and bug files and `.tms/`.
 It makes no network calls, so it shows the state of the working tree, including edits
 that are not pushed yet.
 """
@@ -15,9 +15,12 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
+from tms_agent_kit.bugs import SEVERITIES, BugFile, parse_bug
 from tms_agent_kit.config import Config
 from tms_agent_kit.frontmatter import FormatError
+from tms_agent_kit.markdown import IMAGE_SUFFIXES, render_inline, render_markdown
 from tms_agent_kit.model import Case, Step
 from tms_agent_kit.plan_sync import plan_changes, resolve_cases
 from tms_agent_kit.plans import parse_plan
@@ -35,7 +38,7 @@ from tms_agent_kit.workspace import State, Workspace
 
 NOT_RUN = "Not run"
 _COUNTER_RE = re.compile(r"^(.*)-(\d{1,3})$")
-_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 CaseStatus = Literal["pushed", "modified", "new"]
 
@@ -51,6 +54,7 @@ class CaseRow:
     status: CaseStatus
     plans: list[PlanRow] = field(default_factory=list)
     results: list[tuple[RunRow, CaseResult]] = field(default_factory=list)  # executed only
+    bugs: list[BugRow] = field(default_factory=list)
 
     @property
     def last(self) -> tuple[RunRow, CaseResult] | None:
@@ -93,6 +97,24 @@ class RunRow:
 
 
 @dataclass
+class BugRow:
+    path: Path
+    bug: BugFile | None = None
+    error: str = ""
+    cases: list[CaseRow] = field(default_factory=list)
+
+    @property
+    def is_open(self) -> bool:
+        return self.bug is not None and self.bug.is_open
+
+    @property
+    def order(self) -> tuple[bool, int, str]:
+        """Open bugs first, then by severity."""
+        severity = SEVERITIES.index(self.bug.severity) if self.bug else len(SEVERITIES)
+        return (not self.is_open, severity, self.path.as_posix())
+
+
+@dataclass
 class Problem:
     kind: str
     target: str
@@ -109,6 +131,7 @@ class Report:
     runs: list[RunRow]
     problems: list[Problem]
     deleted: list[str]  # cases deleted locally, by label
+    bugs: list[BugRow] = field(default_factory=list)  # valid and invalid bug files
 
     @property
     def runnable(self) -> list[CaseRow]:
@@ -190,10 +213,45 @@ def build_report(ws: Workspace, config: Config) -> Report:
             if case_row is not None:
                 case_row.results.append((run_row, result))
 
+    bugs: list[BugRow] = []
+    for path in _bug_files(ws):
+        bug_row = BugRow(path)
+        bugs.append(bug_row)
+        try:
+            bug_row.bug = parse_bug(path.read_text(encoding="utf-8"))
+        except (FormatError, UnicodeDecodeError) as e:
+            bug_row.error = str(e)
+            continue
+        for global_id in bug_row.bug.cases:
+            case_row = by_global_id.get(global_id)
+            if case_row is None:
+                problems.append(
+                    Problem("invalid", ws.display(path), f"case #{global_id} not found")
+                )
+                continue
+            bug_row.cases.append(case_row)
+            case_row.bugs.append(bug_row)
+    bugs.sort(key=lambda b: b.order)
+
     problems += [Problem("invalid", ws.display(p.path), p.error) for p in plans if p.error]
     problems += [Problem("invalid", ws.display(r.path), r.error) for r in runs if r.error]
+    problems += [Problem("invalid", ws.display(b.path), b.error) for b in bugs if b.error]
     deleted = [c.target for c in changes.changes if isinstance(c, Delete)]
-    return Report(config, state, ws, cases, plans, runs, problems, deleted)
+    return Report(config, state, ws, cases, plans, runs, problems, deleted, bugs)
+
+
+def _bug_files(ws: Workspace) -> list[Path]:
+    """Bug files, skipping Markdown in evidence folders: `<bug>/` next to `<bug>.md`."""
+    root = ws.bugs_root
+    return [
+        path
+        for path in ws.bug_files()
+        if not any(
+            (parent.parent / f"{parent.name}.md").is_file()
+            for parent in path.parents
+            if parent != root and parent.is_relative_to(root)
+        )
+    ]
 
 
 def _run_order(path: Path) -> tuple[str, int]:
@@ -249,6 +307,7 @@ def render_html(
         view.sections(),
         view.plans(),
         view.runs(),
+        view.bugs(),
         view.cases(),
     ]
     return _PAGE.format(title=escape(title), css=_CSS, js=_JS, body="\n".join(body))
@@ -259,6 +318,8 @@ class _View:
         self.r = report
         self.out_dir = out_dir
         self.focus = focus
+        self.by_global_id = {c.global_id: c for c in report.cases if c.global_id is not None}
+        self.bug_by_path = {b.path.resolve(): b for b in report.bugs if b.bug is not None}
         state = report.state
         base = report.config.base_url.rstrip("/")
         self.project_url = (
@@ -311,7 +372,8 @@ class _View:
             "<nav>"
             + ('<a href="#run">This run</a>' if self.focus is not None else "")
             + '<a href="#attention">Attention</a><a href="#sections">Sections</a>'
-            '<a href="#plans">Plans</a><a href="#runs">Runs</a><a href="#cases">Cases</a></nav>'
+            '<a href="#plans">Plans</a><a href="#runs">Runs</a><a href="#bugs">Bugs</a>'
+            '<a href="#cases">Cases</a></nav>'
             "</header>"
         )
 
@@ -319,28 +381,22 @@ class _View:
         cases = self.r.runnable
         last = Counter(c.last_outcome for c in cases)
         planned = sum(1 for c in cases if c.plans)
+        bugs = [b for b in self.r.bugs if b.bug is not None]
         tiles = [
-            ("Cases", str(len(cases)), f"{sum(c.case.state == 'Ready' for c in cases)} ready"),
-            ("In plans", _percent(planned, len(cases)), f"{planned} of {len(cases)}"),
-            ("Executed", _percent(len(cases) - last[NOT_RUN], len(cases)), "latest result"),
+            ("Cases", str(len(cases)), f"{sum(c.case.state == 'Ready' for c in cases)} ready", ""),
+            ("In plans", _percent(planned, len(cases)), f"{planned} of {len(cases)}", ""),
+            ("Executed", _percent(len(cases) - last[NOT_RUN], len(cases)), "latest result", ""),
             ("Passed", str(last["Passed"]), "latest result", "passed"),
             ("Failed", str(last["Failed"]), "latest result", "failed"),
             ("Blocked", str(last["Blocked"]), "latest result", "blocked"),
-            ("Plans", str(len(self.r.plans)), f"{len(self.r.runs)} runs"),
+            ("Open bugs", str(sum(b.is_open for b in bugs)), f"{len(bugs)} bug files", "failed"),
+            ("Plans", str(len(self.r.plans)), f"{len(self.r.runs)} runs", ""),
         ]
         times = [run.seconds for run in self.r.runs if run.seconds is not None]
         if times:
             note = f"{len(times)} of {len(self.r.runs)} runs"
-            tiles.append(("Time spent", format_duration(sum(times)), note))
-        html = []
-        for tile in tiles:
-            label, value, note = tile[:3]
-            tone = f" {tile[3]}" if len(tile) > 3 and value != "0" else ""
-            html.append(
-                f'<div class="tile{tone}"><div class=label>{label}</div>'
-                f"<div class=value>{value}</div><div class=muted>{note}</div></div>"
-            )
-        return f'<section class="tiles">{"".join(html)}</section>'
+            tiles.append(("Time spent", format_duration(sum(times)), note, ""))
+        return _tiles(tiles)
 
     def attention(self) -> str:
         r = self.r
@@ -372,6 +428,15 @@ class _View:
                     if run.status in ("local", "changed")
                 ]
                 + [f"{escape(label)} {_pill('deleted')}" for label in r.deleted],
+            ),
+            ("Open bugs", [self.bug_ref(b) for b in r.bugs if b.is_open]),
+            (
+                "Failed without an open bug",
+                [
+                    self.case_ref(c)
+                    for c in cases
+                    if c.last_outcome == "Failed" and not any(b.is_open for b in c.bugs)
+                ],
             ),
             ("Needs work", [self.case_ref(c) for c in cases if c.case.state == "NeedsWork"]),
             (
@@ -452,22 +517,60 @@ class _View:
         )
 
     def focused(self) -> str:
+        """The run of this testing session: totals, notes, cases, bugs, results and evidence."""
         run = self.focus
         if run is None or run.run is None:
             return ""
-        executed = run.run.executed
+        run_file = run.run
+        executed = run_file.executed
+        totals = run.totals
+        cases = [
+            self.by_global_id[r.global_id] for r in executed if r.global_id in self.by_global_id
+        ]
+        bugs = sorted({id(b): b for c in cases for b in c.bugs}.values(), key=lambda b: b.order)
+        open_bugs = sum(b.is_open for b in bugs)
         timed = [r for r in executed if r.seconds is not None]
-        notes = [f"{len(executed)} of {len(run.run.results)} cases executed"]
-        if timed:
-            notes.append(f"time recorded for {len(timed)} of {len(executed)}")
-        slowest = sorted(timed, key=lambda r: r.seconds or 0, reverse=True)[:3]
-        slow = ", ".join(
-            f'<a href="#c-{r.global_id}">#{r.global_id}</a> {_time(r.seconds)}' for r in slowest
-        )
+        tiles = [
+            ("Passed", f"{totals['Passed']} / {len(executed)}", "executed cases", "passed"),
+            ("Failed", str(totals["Failed"]), "cases", "failed"),
+            ("Blocked", str(totals["Blocked"]), "cases", "blocked"),
+            ("Not executed", str(totals[NOT_RUN]), f"of {len(run_file.results)} in the run", ""),
+            (
+                "Time spent",
+                format_duration(run.seconds) if run.seconds is not None else "—",
+                f"recorded for {len(timed)} of {len(executed)}",
+                "",
+            ),
+            ("Open bugs", str(open_bugs), f"{len(bugs)} linked to these cases", "failed"),
+        ]
+        parts = [
+            '<section id="run"><h2>This run</h2>',
+            f"<p class=muted>{self.run_meta(run, run_file)}</p>",
+            _tiles(tiles),
+        ]
+        if run_file.notes:
+            parts.append(self.markdown(run_file.notes, run.path.parent))
+        parts.append(f"<h3>Cases</h3>{self.case_table(run_file)}")
+        if bugs:
+            parts.append(f"<h3>Bugs</h3>{''.join(self.bug(b) for b in bugs)}")
+        parts.append(f"<h3>Results and evidence</h3>{self.run_block(run, open_=True)}</section>")
+        return "".join(parts)
+
+    def case_table(self, run_file: RunFile) -> str:
+        rows = []
+        for result in run_file.results:
+            case = self.by_global_id.get(result.global_id)
+            name = self.case_ref(case) if case else f"#{result.global_id} {escape(result.title)}"
+            bugs = ", ".join(self.bug_ref(b) for b in case.bugs) if case else ""
+            rows.append(
+                f"<tr><td>{name}</td><td>{_pill(result.outcome or NOT_RUN)}</td>"
+                f"<td class=num>{_time(result.seconds)}</td>"
+                f"<td>{_inline(_first_line(result.comment))}</td><td>{bugs}</td></tr>"
+            )
         return (
-            f'<section id="run"><h2>This run</h2><p class=muted>{" · ".join(notes)}'
-            + (f" · slowest: {slow}" if slow else "")
-            + f"</p>{self.run_block(run, open_=True)}</section>"
+            "<div class=scroll><table><thead><tr><th>Case</th><th>Result</th>"
+            "<th class=num>Time</th><th>Comment</th><th>Bugs</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div>"
         )
 
     def runs(self) -> str:
@@ -478,24 +581,32 @@ class _View:
             blocks = ["<p class=muted>No other runs.</p>"]
         return f'<section id="runs"><h2>Runs</h2>{"".join(blocks)}</section>'
 
-    def run_block(self, run: RunRow, *, open_: bool = False) -> str:
-        run_file = run.run
-        if run_file is None:
-            return ""
+    def run_meta(self, run: RunRow, run_file: RunFile) -> str:
         plan = self.plan_ref(run.plan) if run.plan else escape(run_file.plan)
         config = f" · {escape(run_file.configuration)}" if run_file.configuration else ""
         tms = self.run_url(run)
         tms_link = (
             f' · <a href="{escape(tms)}" target="_blank" rel="noopener">Test IT</a>' if tms else ""
         )
+        return (
+            f"Plan {plan}{config} · "
+            f'<a href="{self.href(run.path)}">{escape(run.path.name)}</a>{tms_link}'
+        )
+
+    def run_block(self, run: RunRow, *, open_: bool = False) -> str:
+        run_file = run.run
+        if run_file is None:
+            return ""
+        notes = ""
+        if run_file.notes and run is not self.focus:
+            notes = self.markdown(run_file.notes, run.path.parent)
         results = "".join(self.result(run, result) for result in run_file.results)
         return (
             f'<details id="r-{_anchor(run.path.stem)}"{" open" if open_ else ""}>'
             f"<summary><b>{escape(run_file.name)}</b> "
             f"<span class=id>{escape(run.path.name)}</span> "
             f"{_pill(run.status)} {_totals(run.totals)} {_time(run.seconds)}"
-            f"</summary><p class=muted>Plan {plan}{config} · "
-            f'<a href="{self.href(run.path)}">{escape(run.path.name)}</a>{tms_link}</p>'
+            f"</summary><p class=muted>{self.run_meta(run, run_file)}</p>{notes}"
             f"<div class=results>{results}</div></details>"
         )
 
@@ -507,7 +618,7 @@ class _View:
             f"{_time(result.seconds)}</div>"
         ]
         if result.comment:
-            parts.append(f"<div class=text>{escape(result.comment)}</div>")
+            parts.append(f"<div class=text>{_inline(result.comment)}</div>")
         if result.steps:
             steps = "".join(
                 f"<li>Step {s.number}: {_pill(s.outcome)} {escape(s.comment)}"
@@ -516,8 +627,60 @@ class _View:
             )
             parts.append(f"<ul class=steps>{steps}</ul>")
         parts.append(self.files(run, result.attachments))
+        case = self.by_global_id.get(result.global_id)
+        if case is not None and case.bugs and result.outcome is not None:
+            refs = ", ".join(self.bug_ref(b) for b in case.bugs)
+            parts.append(f"<div class=muted>Bugs: {refs}</div>")
         parts.append("</div>")
         return "".join(parts)
+
+    def bugs(self) -> str:
+        bugs = [b for b in self.r.bugs if b.bug is not None]
+        if not bugs:
+            return '<section id="bugs"><h2>Bugs</h2><p class=muted>No bug files.</p></section>'
+        open_count = sum(b.is_open for b in bugs)
+        return (
+            f'<section id="bugs"><h2>Bugs <span class=count>{open_count} open of {len(bugs)}'
+            f"</span></h2>{''.join(self.bug(b) for b in bugs)}</section>"
+        )
+
+    def bug(self, row: BugRow) -> str:
+        bug = row.bug
+        if bug is None:
+            return ""
+        cases = " ".join(self.case_link(c) for c in row.cases)
+        meta = [f'<a href="{self.href(row.path)}">{escape(row.path.name)}</a>']
+        if bug.found:
+            meta.append(f"found {escape(bug.found)}")
+        if bug.ticket:
+            meta.append(f"ticket {escape(bug.ticket)}")
+        if bug.url:
+            url = escape(bug.url, quote=True)
+            meta.append(f'<a href="{url}" target="_blank" rel="noopener">tracker</a>')
+        if row.cases:
+            meta.append("cases " + ", ".join(self.case_ref(c) for c in row.cases))
+        return (
+            f'<details class=bug id="{_bug_anchor(row)}"{" open" if row.is_open else ""}>'
+            f"<summary>{_pill(bug.severity)} {_pill(bug.status)} <b>{escape(bug.title)}</b> "
+            f"{cases}</summary><p class=muted>{' · '.join(meta)}</p>"
+            f"{self.markdown(bug.body, row.path.parent)}</details>"
+        )
+
+    def markdown(self, text: str, base: Path) -> str:
+        """Markdown of a notes or bug file; local links are relative to `base`."""
+
+        def link(target: str) -> str | None:
+            if re.match(r"^(https?|mailto):", target, re.IGNORECASE):
+                return target
+            if not target or target.startswith(("#", "//")) or _SCHEME_RE.match(target):
+                return None
+            path = (base / unquote(target.split("#", 1)[0])).resolve()
+            bug = self.bug_by_path.get(path)
+            if bug is not None:
+                return f"#{_bug_anchor(bug)}"  # the bug card on this page
+            return Path(os.path.relpath(path, self.out_dir)).as_posix()
+
+        return f"<div class=md>{render_markdown(text, link)}</div>"
 
     def files(self, run: RunRow, refs: tuple[FileRef, ...]) -> str:
         if not refs:
@@ -526,7 +689,7 @@ class _View:
         for ref in refs:
             path = run.path.parent / ref.path
             href = self.href(path)
-            if path.suffix.lower() in _IMAGE_SUFFIXES:
+            if path.suffix.lower() in IMAGE_SUFFIXES:
                 items.append(
                     f'<a href="{href}" target="_blank"><img loading="lazy" src="{href}" '
                     f'alt="{escape(ref.path, quote=True)}"></a>'
@@ -555,6 +718,7 @@ class _View:
                 ("failed", "Failed"),
                 ("blocked", "Blocked"),
                 ("notrun", "Not run"),
+                ("bug", "Open bug"),
                 ("noplan", "Not in a plan"),
                 ("unpushed", "Not pushed"),
             )
@@ -575,6 +739,8 @@ class _View:
                 flags.append("noplan")
         if c.status != "pushed":
             flags.append("unpushed")
+        if any(b.is_open for b in c.bugs):
+            flags.append("bug")
         search = " ".join(
             [
                 case.name,
@@ -621,6 +787,9 @@ class _View:
         ]
         if history:
             body.append(f"<h4>Results</h4><ul class=history>{history}</ul>")
+        if c.bugs:
+            refs = "".join(f"<li>{self.bug_ref(b)}</li>" for b in c.bugs)
+            body.append(f"<h4>Bugs</h4><ul class=history>{refs}</ul>")
         return (
             f'<details class=case id="{_case_anchor(c)}" data-flags="{" ".join(flags)}" '
             f'data-search="{escape(search, quote=True)}"><summary>'
@@ -643,6 +812,14 @@ class _View:
         if url:
             return f'<a href="{escape(url)}" target="_blank" rel="noopener">{name}</a>{number}'
         return f'<a href="{self.href(plan.path)}">{name}</a>{number}'
+
+    def bug_ref(self, row: BugRow) -> str:
+        if row.bug is None:
+            return escape(row.path.name)
+        return (
+            f'<a href="#{_bug_anchor(row)}">{escape(row.bug.title)}</a> '
+            f"{_pill(row.bug.severity)} {_pill(row.bug.status)}"
+        )
 
     def run_ref(self, run: RunRow) -> str:
         name = run.run.name if run.run else run.path.name
@@ -675,6 +852,27 @@ def _steps(title: str, steps: tuple[Step, ...]) -> str:
 
 def _pill(value: str) -> str:
     return f'<span class="pill {value.lower().replace(" ", "")}">{escape(value)}</span>'
+
+
+def _inline(text: str) -> str:
+    """A comment: code spans, bold and URLs; local links were taken out as attachments."""
+    return render_inline(text, lambda target: target if re.match(r"^https?:", target) else None)
+
+
+def _tiles(tiles: list[tuple[str, str, str, str]]) -> str:
+    """Tiles of (label, value, note, tone); the tone colors a value other than zero."""
+    html = []
+    for label, value, note, tone in tiles:
+        css = f" {tone}" if tone and not value.startswith("0") else ""
+        html.append(
+            f'<div class="tile{css}"><div class=label>{label}</div>'
+            f"<div class=value>{value}</div><div class=muted>{note}</div></div>"
+        )
+    return f'<section class="tiles">{"".join(html)}</section>'
+
+
+def _bug_anchor(row: BugRow) -> str:
+    return f"b-{_anchor(row.path.stem)}"
 
 
 def _time(seconds: int | None) -> str:
@@ -797,6 +995,22 @@ details ul { padding-left: 20px; }
   color: var(--block); }
 .pill.skipped { background: var(--skip-bg); color: var(--skip); }
 .pill.new, .pill.local { background: var(--info-bg); color: var(--info); }
+.pill.critical, .pill.major, .pill.open { background: var(--fail-bg); color: var(--fail); }
+.pill.minor { background: var(--block-bg); color: var(--block); }
+.pill.trivial { background: var(--skip-bg); color: var(--skip); }
+.pill.fixed { background: var(--pass-bg); color: var(--pass); }
+.md { padding: 4px 0; overflow-wrap: anywhere; }
+.md h3, .md h4, .md h5, .md h6 { font-size: 15px; margin: 16px 0 6px; color: var(--text);
+  text-transform: none; letter-spacing: 0; }
+.md p { margin: 6px 0; }
+.md ul, .md ol { padding-left: 22px; margin: 6px 0; }
+.md table { width: auto; min-width: 50%; }
+.md pre { background: var(--none-bg); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+.md blockquote { margin: 6px 0; padding-left: 12px; border-left: 3px solid var(--line);
+  color: var(--muted); }
+.md img { max-height: 240px; max-width: 100%; border: 1px solid var(--line); border-radius: 4px; }
+.md code, .result code { background: var(--none-bg); border-radius: 4px; padding: 0 3px; }
+#run h3 { margin-top: 24px; }
 .tag { font-size: 12px; color: var(--muted); margin-right: 6px; }
 .time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
   white-space: nowrap; }
